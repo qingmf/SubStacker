@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>SubStacker - 上游配置</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 0; }
+    header { padding: 16px 20px; border-bottom: 1px solid rgba(127,127,127,.25); }
+    main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .card { border: 1px solid rgba(127,127,127,.25); border-radius: 10px; padding: 14px; }
+    label { display:block; font-size: 12px; opacity: .8; margin-bottom: 6px; }
+    input, select, textarea { width: 100%; box-sizing: border-box; padding: 10px; border-radius: 8px; border: 1px solid rgba(127,127,127,.35); background: transparent; }
+    textarea { min-height: 110px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    button { padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(127,127,127,.35); background: transparent; cursor: pointer; }
+    button.primary { background: rgba(0,120,255,.12); border-color: rgba(0,120,255,.35); }
+    button.danger { background: rgba(255,0,0,.08); border-color: rgba(255,0,0,.35); }
+    .list { display: grid; gap: 10px; }
+    .item { display:flex; align-items:center; justify-content:space-between; gap: 10px; padding: 10px; border-radius: 10px; border: 1px solid rgba(127,127,127,.25); }
+    .item small { opacity:.7 }
+    .actions { display:flex; gap: 8px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .hint { font-size: 12px; opacity: .75; line-height: 1.5; }
+    pre { margin: 0; padding: 12px; border-radius: 10px; border: 1px solid rgba(127,127,127,.25); overflow:auto; }
+    @media (max-width: 900px) { .row { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<header>
+  <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+    <div>
+      <div style="font-weight:700;">SubStacker</div>
+      <div class="hint">机场订阅聚合器：配置多个上游，生成 OpenClash 可用的订阅 YAML。</div>
+    </div>
+    <div class="mono" id="subUrl"></div>
+  </div>
+</header>
+<main>
+  <div class="row">
+    <div class="card">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+        <div style="font-weight:700;">上游列表</div>
+        <button class="primary" id="newBtn">新建</button>
+      </div>
+      <div class="list" id="list"></div>
+      <div class="hint" style="margin-top:10px;">
+        支持类型：
+        <span class="mono">CLASH_YAML_URL</span>（上游是 Clash YAML）、
+        <span class="mono">URI_LIST_URL</span>（上游是 URI 列表或 base64(URI 列表)，包含 ss/vmess/trojan）。
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="font-weight:700; margin-bottom:10px;" id="formTitle">新建上游</div>
+      <input type="hidden" id="id"/>
+      <div style="display:grid; gap:10px;">
+        <div>
+          <label>名称</label>
+          <input id="name" placeholder="例如：主机场 / 备用 / 自建节点"/>
+        </div>
+        <div>
+          <label>类型</label>
+          <select id="type">
+            <option value="CLASH_YAML_URL">CLASH_YAML_URL</option>
+            <option value="URI_LIST_URL">URI_LIST_URL</option>
+          </select>
+        </div>
+        <div>
+          <label>URL</label>
+          <input id="url" class="mono" placeholder="https://example.com/sub?token=..."/>
+        </div>
+        <div>
+          <label>启用</label>
+          <select id="enabled">
+            <option value="true">true</option>
+            <option value="false">false</option>
+          </select>
+        </div>
+        <div>
+          <label>Headers (JSON，可选)</label>
+          <textarea id="headers" placeholder='{"User-Agent":"clash"}'></textarea>
+          <div class="hint">用于某些订阅需要自定义请求头；留空表示不设置。</div>
+        </div>
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="primary" id="saveBtn">保存</button>
+          <button id="cancelBtn">取消</button>
+          <button class="danger" id="deleteBtn" style="display:none;">删除</button>
+          <button id="previewBtn">预览生成 YAML</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px;">
+      <div style="font-weight:700;">预览</div>
+      <div class="actions">
+        <button id="copyBtn">复制</button>
+        <button id="refreshBtn">刷新订阅</button>
+      </div>
+    </div>
+    <pre class="mono" id="preview" style="min-height:180px;">点击“预览生成 YAML”或“刷新订阅”。</pre>
+  </div>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const state = { upstreams: [], editing: null };
+
+  function api(path, opts = {}) {
+    return fetch(path, { headers: { "Content-Type": "application/json" }, ...opts })
+      .then(async r => {
+        const ct = r.headers.get("content-type") || "";
+        if (!r.ok) {
+          const msg = ct.includes("application/json") ? (await r.json()).message : await r.text();
+          throw new Error(msg || ("HTTP " + r.status));
+        }
+        if (ct.includes("application/json")) return r.json();
+        return r.text();
+      });
+  }
+
+  function setSubUrl() {
+    const url = new URL(window.location.href);
+    url.pathname = "/sub/openclash.yaml";
+    url.search = "";
+    url.hash = "";
+    $("subUrl").textContent = url.toString();
+  }
+
+  function renderList() {
+    const el = $("list");
+    el.innerHTML = "";
+    if (!state.upstreams.length) {
+      el.innerHTML = "<div class='hint'>暂无上游，点击“新建”添加。</div>";
+      return;
+    }
+    for (const u of state.upstreams) {
+      const div = document.createElement("div");
+      div.className = "item";
+      div.innerHTML = `
+        <div style="min-width:0;">
+          <div style="font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(u.name || u.id)}</div>
+          <small class="mono">${escapeHtml(u.type)} | ${u.enabled ? "enabled" : "disabled"}</small>
+          <div class="mono" style="font-size:12px; opacity:.75; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(u.url || "")}</div>
+        </div>
+        <div class="actions">
+          <button data-id="${u.id}">编辑</button>
+        </div>
+      `;
+      div.querySelector("button").addEventListener("click", () => edit(u.id));
+      el.appendChild(div);
+    }
+  }
+
+  function resetForm() {
+    state.editing = null;
+    $("formTitle").textContent = "新建上游";
+    $("id").value = "";
+    $("name").value = "";
+    $("type").value = "CLASH_YAML_URL";
+    $("url").value = "";
+    $("enabled").value = "true";
+    $("headers").value = "";
+    $("deleteBtn").style.display = "none";
+  }
+
+  function edit(id) {
+    const u = state.upstreams.find(x => x.id === id);
+    if (!u) return;
+    state.editing = u;
+    $("formTitle").textContent = "编辑上游";
+    $("id").value = u.id;
+    $("name").value = u.name || "";
+    $("type").value = u.type || "CLASH_YAML_URL";
+    $("url").value = u.url || "";
+    $("enabled").value = String(!!u.enabled);
+    $("headers").value = u.headers ? JSON.stringify(u.headers, null, 2) : "";
+    $("deleteBtn").style.display = "";
+  }
+
+  async function load() {
+    state.upstreams = await api("/api/upstreams");
+    renderList();
+  }
+
+  function readForm() {
+    let headers = null;
+    const rawHeaders = $("headers").value.trim();
+    if (rawHeaders) headers = JSON.parse(rawHeaders);
+    return {
+      id: $("id").value.trim() || null,
+      name: $("name").value.trim(),
+      type: $("type").value,
+      url: $("url").value.trim(),
+      enabled: $("enabled").value === "true",
+      headers
+    };
+  }
+
+  async function save() {
+    const body = readForm();
+    if (!body.name) throw new Error("名称不能为空");
+    if (!body.url) throw new Error("URL 不能为空");
+    if (state.editing) {
+      await api("/api/upstreams/" + encodeURIComponent(state.editing.id), { method: "PUT", body: JSON.stringify(body) });
+    } else {
+      await api("/api/upstreams", { method: "POST", body: JSON.stringify(body) });
+    }
+    resetForm();
+    await load();
+  }
+
+  async function del() {
+    if (!state.editing) return;
+    if (!confirm("确定删除这个上游？")) return;
+    await api("/api/upstreams/" + encodeURIComponent(state.editing.id), { method: "DELETE" });
+    resetForm();
+    await load();
+  }
+
+  async function preview() {
+    $("preview").textContent = "生成中...";
+    const text = await api("/sub/openclash.yaml");
+    $("preview").textContent = text;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+  }
+
+  $("newBtn").addEventListener("click", resetForm);
+  $("cancelBtn").addEventListener("click", resetForm);
+  $("saveBtn").addEventListener("click", () => save().catch(e => alert(e.message)));
+  $("deleteBtn").addEventListener("click", () => del().catch(e => alert(e.message)));
+  $("previewBtn").addEventListener("click", () => preview().catch(e => alert(e.message)));
+  $("refreshBtn").addEventListener("click", () => preview().catch(e => alert(e.message)));
+  $("copyBtn").addEventListener("click", async () => {
+    await navigator.clipboard.writeText($("preview").textContent);
+  });
+
+  setSubUrl();
+  resetForm();
+  load().catch(e => alert(e.message));
+</script>
+</body>
+</html>
+
