@@ -14,7 +14,8 @@ services:
     volumes:
       - substacker-data:/work/data
     networks:
-      - default
+      default:
+        ipv4_address: 192.168.3.5
 
 volumes:
   substacker-data:
