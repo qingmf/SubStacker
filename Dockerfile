@@ -1,27 +1,13 @@
-FROM quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-21 AS build
-
-USER root
-RUN microdnf install -y maven && microdnf clean all
-
-WORKDIR /project
-
-COPY pom.xml ./
-COPY src ./src
-
-RUN mvn -B package -DskipTests -Dnative
-
-FROM registry.access.redhat.com/ubi9/ubi-micro:9.5 AS runtime
+FROM eclipse-temurin:21-jre-jammy AS runtime
 
 WORKDIR /work
 
-COPY --from=build /project/target/*-runner /work/substacker
+COPY substacker-0.1.0-SNAPSHOT.jar /work/substacker.jar
 COPY data /work/data
-
-RUN chmod 755 /work/substacker
 
 ENV QUARKUS_HTTP_HOST=0.0.0.0
 ENV SUBSTACKER_DATA_DIR=/work/data
 
 EXPOSE 8080
 
-ENTRYPOINT ["/work/substacker"]
+ENTRYPOINT ["java", "-jar", "/work/substacker.jar"]
