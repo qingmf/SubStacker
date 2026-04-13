@@ -217,7 +217,7 @@
 
     .main-grid {
       display: grid;
-      grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
+      grid-template-columns: minmax(520px, 2fr) minmax(0, 1fr);
       gap: 24px;
       align-items: start;
     }
@@ -431,6 +431,15 @@
       }
     }
 
+    .el-table .is-active-row {
+      --el-table-tr-bg-color: rgba(237, 243, 255, 0.98);
+    }
+
+    .el-table .is-active-row td {
+      border-top: 1px solid rgba(33, 83, 255, 0.22) !important;
+      border-bottom: 1px solid rgba(33, 83, 255, 0.22) !important;
+    }
+
     @media (max-width: 760px) {
       #app {
         padding: 18px 14px 32px;
@@ -536,9 +545,12 @@
         <div class="panel-header">
           <div>
             <div class="panel-title">上游列表</div>
-            <div class="subtle">点击左侧卡片进入编辑态。列表视图保留了原有全部 CRUD 功能。</div>
+            <div class="subtle">表格方式管理上游订阅，支持编辑、删除和新增。</div>
           </div>
-          <el-button type="primary" plain @click="startCreate">新建上游</el-button>
+          <div style="display: flex; gap: 10px; flex-wrap: wrap">
+            <el-button @click="templateDialogVisible = true">管理模板</el-button>
+            <el-button type="primary" plain @click="startCreate">新建上游</el-button>
+          </div>
         </div>
 
         <el-skeleton v-if="loading.list" :rows="7" animated></el-skeleton>
@@ -549,166 +561,45 @@
           </el-empty>
         </div>
 
-        <div v-else class="list-wrap">
-          <article
-            v-for="item in upstreams"
-            :key="item.id"
-            class="upstream-card"
-            :class="{ 'is-active': editingId === item.id }"
-            @click="selectUpstream(item)"
+        <div v-else>
+          <el-table
+            :data="upstreams"
+            highlight-current-row
+            :row-class-name="rowClassName"
+            @row-click="selectUpstream"
+            style="width: 100%; border-radius: 18px; overflow: hidden"
           >
-            <div class="upstream-title">
-              <div class="upstream-name">{{ item.name || item.id }}</div>
-              <el-tag :type="item.enabled ? 'success' : 'info'" round>{{ item.enabled ? '已启用' : '已停用' }}</el-tag>
-            </div>
-            <div class="upstream-meta">
-              <el-tag round effect="plain" class="muted-tag">{{ typeLabel(item.type) }}</el-tag>
-              <span>ID: {{ item.id }}</span>
-            </div>
-            <div class="url-line">{{ item.url }}</div>
-          </article>
+            <el-table-column prop="name" label="名称" min-width="140" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span style="font-weight: 600">{{ row.name || row.id }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="type" label="类型" width="130">
+              <template #default="{ row }">
+                <el-tag size="small" effect="plain" class="muted-tag">{{ typeLabel(row.type) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="enabled" label="状态" width="90">
+              <template #default="{ row }">
+                <el-tag :type="row.enabled ? 'success' : 'info'" size="small" round>{{ row.enabled ? '已启用' : '已停用' }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="url" label="订阅地址" min-width="200" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span class="mono-surface" style="font-size: 12px">{{ row.url }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="130" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" size="small" @click.stop="selectUpstream(row)">编辑</el-button>
+                <el-button link type="danger" size="small" @click.stop="removeByRow(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
         </div>
       </aside>
 
       <div class="panel-grid">
-        <section class="panel">
-          <div class="panel-header">
-            <div>
-              <div class="panel-title">远程模板</div>
-              <div class="subtle">支持保存远程 `.ini` 模板到下拉框，适配 `subconverter` 常见的 `ruleset` 和 `custom_proxy_group` 写法。</div>
-            </div>
-            <el-tag :type="selectedConfigIsCustom ? 'warning' : 'success'" effect="plain" round>
-              {{ selectedConfigIsCustom ? "REMOTE URL" : "BUILT-IN" }}
-            </el-tag>
-          </div>
-
-          <el-form label-position="top">
-            <div class="form-split">
-              <el-form-item label="当前选中模板">
-                <el-input :model-value="currentConfigLabel" readonly></el-input>
-              </el-form-item>
-
-              <el-form-item label="当前订阅链接">
-                <el-input class="mono-field" :model-value="subUrl" readonly></el-input>
-              </el-form-item>
-            </div>
-
-            <el-form-item label="模板名称">
-              <el-input v-model="templateForm.name" placeholder="例如：小蛋蛋规则 / 自定义远程模板" clearable></el-input>
-            </el-form-item>
-
-            <el-form-item label="模板 URL">
-              <el-input
-                v-model="templateForm.url"
-                class="mono-field"
-                placeholder="https://cdn.jsdelivr.net/gh/.../xxx.ini"
-                clearable
-              ></el-input>
-            </el-form-item>
-
-            <el-form-item label="地区组自动测速">
-              <div class="switch-field">
-                <el-switch
-                  :model-value="regionalGroupsUrlTestEnabled"
-                  :loading="loading.settings"
-                  inline-prompt
-                  active-text="开"
-                  inactive-text="关"
-                  @change="changeRegionalGroupsUrlTest"
-                ></el-switch>
-                <span class="switch-note">
-                  {{ regionalGroupsUrlTestEnabled
-                    ? "像“香港节点 / 台湾节点 / 日本节点”这类地区组会自动改成 url-test。"
-                    : "地区组保持模板原始类型，通常还是 select。" }}
-                </span>
-              </div>
-            </el-form-item>
-
-            <el-alert :closable="false" show-icon>
-              <template #title>
-                保存后会出现在下拉框。后端既支持选已保存模板，也支持在 `/sub/openclash.yaml?config=` 里直接传远程 URL。
-              </template>
-            </el-alert>
-
-            <div class="form-actions">
-              <el-button @click="startCreateTemplate">新建远程模板</el-button>
-              <el-button type="primary" :loading="loading.template" @click="saveTemplate">保存为模板</el-button>
-              <el-button
-                type="danger"
-                plain
-                :disabled="!templateForm.id"
-                :loading="loading.template"
-                @click="removeTemplate"
-              >删除当前模板</el-button>
-            </div>
-          </el-form>
-        </section>
-
-        <section class="panel">
-          <div class="panel-header">
-            <div>
-              <div class="panel-title">{{ editingId ? "编辑上游" : "新建上游" }}</div>
-              <div class="subtle">{{ editingId ? "当前正在修改已存在的上游配置。" : "新增一个上游订阅来源，保存后立即写入状态文件。" }}</div>
-            </div>
-            <el-tag v-if="editingId" type="warning" effect="dark" round>Editing</el-tag>
-          </div>
-
-          <el-form label-position="top">
-            <el-form-item label="名称">
-              <el-input v-model="form.name" placeholder="例如：主机场 / 备用 / 自建节点" clearable></el-input>
-            </el-form-item>
-
-            <div class="form-split">
-              <el-form-item label="类型">
-                <el-select v-model="form.type" placeholder="选择上游类型">
-                  <el-option
-                    v-for="option in typeOptions"
-                    :key="option.value"
-                    :label="option.label"
-                    :value="option.value"
-                  ></el-option>
-                </el-select>
-              </el-form-item>
-
-              <el-form-item label="启用状态">
-                <div class="switch-field">
-                  <el-switch v-model="form.enabled" inline-prompt active-text="开" inactive-text="关"></el-switch>
-                  <span class="switch-note">{{ form.enabled ? "当前会参与聚合输出。" : "当前仅保存配置，不参与聚合。" }}</span>
-                </div>
-              </el-form-item>
-            </div>
-
-            <el-form-item label="URL">
-              <el-input v-model="form.url" class="mono-field" placeholder="https://example.com/sub?token=..." clearable></el-input>
-            </el-form-item>
-
-            <el-form-item label="Headers (JSON，可选)">
-              <el-input
-                v-model="form.headersText"
-                class="mono-field"
-                type="textarea"
-                :autosize="{ minRows: 5, maxRows: 10 }"
-                placeholder='{"User-Agent":"clash"}'
-              ></el-input>
-            </el-form-item>
-
-            <el-alert :closable="false" show-icon>
-              <template #title>
-                {{ form.type === "CLASH_YAML_URL"
-                  ? "读取上游 Clash YAML 中的 proxies 列表。"
-                  : "读取 URI 列表或 Base64(URI 列表)，支持 ss / vmess / trojan。" }}
-              </template>
-            </el-alert>
-
-            <div class="form-actions">
-              <el-button type="primary" :loading="loading.save" @click="save">保存</el-button>
-              <el-button @click="resetForm">取消</el-button>
-              <el-button type="danger" plain :disabled="!editingId" :loading="loading.delete" @click="removeCurrent">删除</el-button>
-              <el-button type="success" plain :loading="loading.preview" @click="preview">预览生成 YAML</el-button>
-            </div>
-          </el-form>
-        </section>
-
         <section class="panel">
           <div class="panel-header">
             <div>
@@ -721,6 +612,22 @@
             </div>
           </div>
 
+          <div class="switch-field" style="margin-bottom: 14px">
+            <el-switch
+              :model-value="regionalGroupsUrlTestEnabled"
+              :loading="loading.settings"
+              inline-prompt
+              active-text="开"
+              inactive-text="关"
+              @change="changeRegionalGroupsUrlTest"
+            ></el-switch>
+            <span class="switch-note">
+              {{ regionalGroupsUrlTestEnabled
+                ? "地区组自动测速已开启：像“香港节点 / 台湾节点 / 日本节点”这类地区组会自动改成 url-test。"
+                : "地区组自动测速已关闭：地区组保持模板原始类型，通常还是 select。" }}
+            </span>
+          </div>
+
           <pre class="preview-box" :class="{ 'is-placeholder': previewText === previewPlaceholder }">{{ previewText }}</pre>
         </section>
       </div>
@@ -728,6 +635,125 @@
 
     <div class="footer-note">当前页面使用 `/api/upstreams` 和 `/api/subscription/settings` 管理状态；`config` 既支持内置模板，也支持你保存的远程 `.ini` 模板，甚至支持直接传 URL。</div>
   </div>
+
+  <el-dialog
+    v-model="dialogVisible"
+    :title="dialogMode === 'create' ? '新建上游' : '编辑上游'"
+    width="640px"
+    align-center
+    destroy-on-close
+    @closed="resetForm"
+  >
+    <el-form label-position="top">
+      <el-form-item label="名称">
+        <el-input v-model="form.name" placeholder="例如：主机场 / 备用 / 自建节点" clearable></el-input>
+      </el-form-item>
+
+      <div class="form-split">
+        <el-form-item label="类型">
+          <el-select v-model="form.type" placeholder="选择上游类型" style="width: 100%">
+            <el-option
+              v-for="option in typeOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            ></el-option>
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="启用状态">
+          <div class="switch-field">
+            <el-switch v-model="form.enabled" inline-prompt active-text="开" inactive-text="关"></el-switch>
+            <span class="switch-note">{{ form.enabled ? "当前会参与聚合输出。" : "当前仅保存配置，不参与聚合。" }}</span>
+          </div>
+        </el-form-item>
+      </div>
+
+      <el-form-item label="URL">
+        <el-input v-model="form.url" class="mono-field" placeholder="https://example.com/sub?token=..." clearable></el-input>
+      </el-form-item>
+
+      <el-form-item label="Headers (JSON，可选)">
+        <el-input
+          v-model="form.headersText"
+          class="mono-field"
+          type="textarea"
+          :autosize="{ minRows: 5, maxRows: 10 }"
+          placeholder='{"User-Agent":"clash"}'
+        ></el-input>
+      </el-form-item>
+
+      <el-alert :closable="false" show-icon>
+        <template #title>
+          {{ form.type === "CLASH_YAML_URL"
+            ? "读取上游 Clash YAML 中的 proxies 列表。"
+            : "读取 URI 列表或 Base64(URI 列表)，支持 ss / vmess / trojan。" }}
+        </template>
+      </el-alert>
+    </el-form>
+
+    <template #footer>
+      <div class="dialog-footer" style="display: flex; gap: 12px; justify-content: flex-end; flex-wrap: wrap">
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="danger" plain :disabled="dialogMode !== 'edit'" :loading="loading.delete" @click="removeCurrent">删除</el-button>
+        <el-button type="primary" :loading="loading.save" @click="save">保存</el-button>
+      </div>
+    </template>
+  </el-dialog>
+
+  <el-dialog
+    v-model="templateDialogVisible"
+    title="远程模板管理"
+    width="640px"
+    align-center
+    destroy-on-close
+  >
+    <el-form label-position="top">
+      <div class="form-split">
+        <el-form-item label="当前选中模板">
+          <el-input :model-value="currentConfigLabel" readonly></el-input>
+        </el-form-item>
+
+        <el-form-item label="当前订阅链接">
+          <el-input class="mono-field" :model-value="subUrl" readonly></el-input>
+        </el-form-item>
+      </div>
+
+      <el-form-item label="模板名称">
+        <el-input v-model="templateForm.name" placeholder="例如：小蛋蛋规则 / 自定义远程模板" clearable></el-input>
+      </el-form-item>
+
+      <el-form-item label="模板 URL">
+        <el-input
+          v-model="templateForm.url"
+          class="mono-field"
+          placeholder="https://cdn.jsdelivr.net/gh/.../xxx.ini"
+          clearable
+        ></el-input>
+      </el-form-item>
+
+      <el-alert :closable="false" show-icon>
+        <template #title>
+          保存后会出现在下拉框。后端既支持选已保存模板，也支持在 `/sub/openclash.yaml?config=` 里直接传远程 URL。
+        </template>
+      </el-alert>
+    </el-form>
+
+    <template #footer>
+      <div class="dialog-footer" style="display: flex; gap: 12px; justify-content: flex-end; flex-wrap: wrap">
+        <el-button @click="templateDialogVisible = false">关闭</el-button>
+        <el-button @click="startCreateTemplate">新建远程模板</el-button>
+        <el-button type="primary" :loading="loading.template" @click="saveTemplate">保存为模板</el-button>
+        <el-button
+          type="danger"
+          plain
+          :disabled="!templateForm.id"
+          :loading="loading.template"
+          @click="removeTemplate"
+        >删除当前模板</el-button>
+      </div>
+    </template>
+  </el-dialog>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
@@ -788,6 +814,9 @@
         form: createEmptyForm(),
         templateForm: createEmptyTemplateForm(),
         editingId: null,
+        dialogVisible: false,
+        dialogMode: "create",
+        templateDialogVisible: false,
         subUrl: "",
         selectedConfigId: "default",
         regionalGroupsUrlTestEnabled: false,
@@ -902,16 +931,61 @@
 
       function resetForm() {
         state.editingId = null;
+        state.dialogVisible = false;
+        state.dialogMode = "create";
         applyForm(null);
       }
 
       function startCreate() {
-        resetForm();
+        state.editingId = null;
+        applyForm(null);
+        state.dialogMode = "create";
+        state.dialogVisible = true;
       }
 
       function selectUpstream(item) {
         state.editingId = item.id;
         applyForm(item);
+        state.dialogMode = "edit";
+        state.dialogVisible = true;
+      }
+
+      function rowClassName({ row }) {
+        return row.id === state.editingId ? 'is-active-row' : '';
+      }
+
+      async function removeByRow(item) {
+        if (!item.id || state.loading.delete) {
+          return;
+        }
+        try {
+          await ElementPlus.ElMessageBox.confirm(
+            "删除后需要重新创建才能恢复，确定继续吗？",
+            "删除上游",
+            {
+              type: "warning",
+              confirmButtonText: "删除",
+              cancelButtonText: "取消"
+            }
+          );
+        } catch (error) {
+          return;
+        }
+        state.loading.delete = true;
+        try {
+          await api("/api/upstreams/" + encodeURIComponent(item.id), {
+            method: "DELETE"
+          });
+          if (state.editingId === item.id) {
+            resetForm();
+          }
+          await load();
+          ElementPlus.ElMessage.success("上游已删除");
+        } catch (error) {
+          ElementPlus.ElMessage.error(error.message || "删除失败");
+        } finally {
+          state.loading.delete = false;
+        }
       }
 
       function parseHeaders() {
@@ -1057,6 +1131,7 @@
             body: JSON.stringify({ name, url })
           });
           applySettingsResponse(payload);
+          state.templateDialogVisible = false;
           ElementPlus.ElMessage.success(editing ? "远程模板已更新" : "远程模板已创建");
         } catch (error) {
           ElementPlus.ElMessage.error(error.message || "远程模板保存失败");
@@ -1090,6 +1165,7 @@
             method: "DELETE"
           });
           applySettingsResponse(payload);
+          state.templateDialogVisible = false;
           ElementPlus.ElMessage.success("远程模板已删除");
         } catch (error) {
           ElementPlus.ElMessage.error(error.message || "远程模板删除失败");
@@ -1131,6 +1207,7 @@
           }
 
           await load();
+          state.dialogVisible = false;
           if (savedId) {
             const current = state.upstreams.find((item) => item.id === savedId);
             if (current) {
@@ -1171,6 +1248,7 @@
           await api("/api/upstreams/" + encodeURIComponent(state.editingId), {
             method: "DELETE"
           });
+          state.dialogVisible = false;
           resetForm();
           await load();
           ElementPlus.ElMessage.success("上游已删除");
@@ -1247,9 +1325,11 @@
         currentConfigDescription,
         selectedConfigIsCustom,
         typeLabel,
+        rowClassName,
         startCreate,
         startCreateTemplate,
         selectUpstream,
+        removeByRow,
         changeSubscriptionConfig,
         changeRegionalGroupsUrlTest,
         resetForm,

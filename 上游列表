@@ -1,0 +1,35 @@
+247:    .panel-title {
+248-      margin: 0;
+249-      font-size: 24px;
+250-      font-weight: 700;
+251-      letter-spacing: -0.03em;
+252-    }
+253-
+254-    .subtle {
+255-      margin-top: 6px;
+256-      color: var(--muted);
+257-      font-size: 14px;
+--
+547:            <div class="panel-title">上游列表</div>
+548-            <div class="subtle">表格方式管理上游订阅，支持编辑、删除和新增。</div>
+549-          </div>
+550-          <el-button type="primary" plain @click="startCreate">新建上游</el-button>
+551-        </div>
+552-
+553-        <el-skeleton v-if="loading.list" :rows="7" animated></el-skeleton>
+554-
+555-        <div v-else-if="!upstreams.length" class="empty-shell">
+556-          <el-empty description="还没有配置任何上游">
+557-            <el-button type="primary" @click="startCreate">立即添加</el-button>
+--
+603:              <div class="panel-title">生成预览</div>
+604-              <div class="subtle">直接查看 `/sub/openclash.yaml` 当前输出，方便复制、排查和校验生成结果。</div>
+605-            </div>
+606-            <div class="preview-actions">
+607-              <el-button @click="copyPreview">复制</el-button>
+608-              <el-button type="primary" plain :loading="loading.preview" @click="preview">刷新订阅</el-button>
+609-            </div>
+610-          </div>
+611-
+612-          <div class="switch-field" style="margin-bottom: 14px">
+613-            <el-switch
