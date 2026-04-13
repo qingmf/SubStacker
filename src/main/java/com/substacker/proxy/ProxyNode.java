@@ -8,7 +8,16 @@ import java.util.Map;
 public record ProxyNode(
     String name,
     Map<String, Object> clashProxy,
-    String dedupKey
+    String dedupKey,
+    String sourceGroupName,
+    Integer sourceGroupId,
+    String sourceProviderName
 ) {
-}
+  public ProxyNode(String name, Map<String, Object> clashProxy, String dedupKey) {
+    this(name, clashProxy, dedupKey, null, null, null);
+  }
 
+  public ProxyNode withSource(String sourceGroupName, Integer sourceGroupId, String sourceProviderName) {
+    return new ProxyNode(name, clashProxy, dedupKey, sourceGroupName, sourceGroupId, sourceProviderName);
+  }
+}

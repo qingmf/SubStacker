@@ -173,6 +173,11 @@
       line-height: 1.6;
     }
 
+    .sub-link-form {
+      display: grid;
+      gap: 12px;
+    }
+
     .metrics {
       position: relative;
       z-index: 1;
@@ -476,12 +481,29 @@
 
         <div class="sub-link-card">
           <div class="section-kicker">OpenClash Subscription</div>
-          <el-input class="mono-field" :model-value="subUrl" readonly size="large">
-            <template #append>
-              <el-button @click="copySubUrl">复制</el-button>
-            </template>
-          </el-input>
-          <div class="helper">把这条地址配置到 OpenClash。修改上游后，可以直接在下方预览区刷新订阅结果。</div>
+          <div class="sub-link-form">
+            <el-input class="mono-field" :model-value="subUrl" readonly size="large">
+              <template #append>
+                <el-button @click="copySubUrl">复制</el-button>
+              </template>
+            </el-input>
+            <el-select
+              :model-value="selectedConfigId"
+              size="large"
+              :loading="loading.settings"
+              placeholder="选择生成配置"
+              @change="changeSubscriptionConfig"
+            >
+              <el-option
+                v-for="option in configOptions"
+                :key="option.id"
+                :label="option.label"
+                :value="option.id"
+              ></el-option>
+            </el-select>
+          </div>
+          <div class="helper">下拉框会同步更新 URL 中的 `config` 参数，并保存为默认生成配置。</div>
+          <div v-if="currentConfigDescription" class="helper">{{ currentConfigDescription }}</div>
         </div>
       </div>
 
@@ -549,6 +571,79 @@
       </aside>
 
       <div class="panel-grid">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">远程模板</div>
+              <div class="subtle">支持保存远程 `.ini` 模板到下拉框，适配 `subconverter` 常见的 `ruleset` 和 `custom_proxy_group` 写法。</div>
+            </div>
+            <el-tag :type="selectedConfigIsCustom ? 'warning' : 'success'" effect="plain" round>
+              {{ selectedConfigIsCustom ? "REMOTE URL" : "BUILT-IN" }}
+            </el-tag>
+          </div>
+
+          <el-form label-position="top">
+            <div class="form-split">
+              <el-form-item label="当前选中模板">
+                <el-input :model-value="currentConfigLabel" readonly></el-input>
+              </el-form-item>
+
+              <el-form-item label="当前订阅链接">
+                <el-input class="mono-field" :model-value="subUrl" readonly></el-input>
+              </el-form-item>
+            </div>
+
+            <el-form-item label="模板名称">
+              <el-input v-model="templateForm.name" placeholder="例如：小蛋蛋规则 / 自定义远程模板" clearable></el-input>
+            </el-form-item>
+
+            <el-form-item label="模板 URL">
+              <el-input
+                v-model="templateForm.url"
+                class="mono-field"
+                placeholder="https://cdn.jsdelivr.net/gh/.../xxx.ini"
+                clearable
+              ></el-input>
+            </el-form-item>
+
+            <el-form-item label="地区组自动测速">
+              <div class="switch-field">
+                <el-switch
+                  :model-value="regionalGroupsUrlTestEnabled"
+                  :loading="loading.settings"
+                  inline-prompt
+                  active-text="开"
+                  inactive-text="关"
+                  @change="changeRegionalGroupsUrlTest"
+                ></el-switch>
+                <span class="switch-note">
+                  {{ regionalGroupsUrlTestEnabled
+                    ? "像“香港节点 / 台湾节点 / 日本节点”这类地区组会自动改成 url-test。"
+                    : "地区组保持模板原始类型，通常还是 select。" }}
+                </span>
+              </div>
+            </el-form-item>
+
+            <el-alert :closable="false" show-icon>
+              <template #title>
+                保存后会出现在下拉框。后端既支持选已保存模板，也支持在 `/sub/openclash.yaml?config=` 里直接传远程 URL。
+              </template>
+            </el-alert>
+
+            <div class="form-actions">
+              <el-button @click="startCreateTemplate">新建远程模板</el-button>
+              <el-button type="primary" :loading="loading.template" @click="saveTemplate">保存为模板</el-button>
+              <el-button
+                type="danger"
+                plain
+                :disabled="!templateForm.id"
+                :loading="loading.template"
+                @click="removeTemplate"
+              >删除当前模板</el-button>
+            </div>
+          </el-form>
+        </section>
+
         <section class="panel">
           <div class="panel-header">
             <div>
@@ -631,7 +726,7 @@
       </div>
     </section>
 
-    <div class="footer-note">前端已切到组件化 UI，接口仍然使用 `/api/upstreams` 和 `/sub/openclash.yaml`，不需要改后端调用方式。</div>
+    <div class="footer-note">当前页面使用 `/api/upstreams` 和 `/api/subscription/settings` 管理状态；`config` 既支持内置模板，也支持你保存的远程 `.ini` 模板，甚至支持直接传 URL。</div>
   </div>
 </div>
 
@@ -643,6 +738,29 @@
   createApp({
     setup() {
       const previewPlaceholder = "点击“预览生成 YAML”或“刷新订阅”。";
+      const fallbackConfigOptions = [
+        {
+          id: "default",
+          label: "默认模板",
+          description: "保持当前输出风格，提供 SELECT、AUTO、GLOBAL 三个组。",
+          url: "",
+          custom: false
+        },
+        {
+          id: "fallback",
+          label: "故障转移模板",
+          description: "增加 FALLBACK 组，适合希望在多个节点间自动切换的场景。",
+          url: "",
+          custom: false
+        },
+        {
+          id: "balance",
+          label: "负载均衡模板",
+          description: "增加 BALANCE 组，适合把流量轮询到多个节点。",
+          url: "",
+          custom: false
+        }
+      ];
       const typeOptions = [
         { value: "CLASH_YAML_URL", label: "CLASH_YAML_URL" },
         { value: "URI_LIST_URL", label: "URI_LIST_URL" }
@@ -659,18 +777,29 @@
         enabled: true,
         headersText: ""
       });
+      const createEmptyTemplateForm = () => ({
+        id: "",
+        name: "",
+        url: ""
+      });
 
       const state = reactive({
         upstreams: [],
         form: createEmptyForm(),
+        templateForm: createEmptyTemplateForm(),
         editingId: null,
         subUrl: "",
+        selectedConfigId: "default",
+        regionalGroupsUrlTestEnabled: false,
+        configOptions: fallbackConfigOptions,
         previewText: previewPlaceholder,
         loading: {
           list: false,
           save: false,
           delete: false,
-          preview: false
+          preview: false,
+          settings: false,
+          template: false
         }
       });
 
@@ -678,6 +807,16 @@
       const enabledCount = computed(() => state.upstreams.filter((item) => item.enabled).length);
       const clashCount = computed(() => state.upstreams.filter((item) => item.type === "CLASH_YAML_URL").length);
       const uriCount = computed(() => state.upstreams.filter((item) => item.type === "URI_LIST_URL").length);
+      const selectedConfigOption = computed(() => state.configOptions.find((item) => item.id === state.selectedConfigId) || null);
+      const currentConfigLabel = computed(() => {
+        const current = selectedConfigOption.value;
+        return current ? current.label : state.selectedConfigId;
+      });
+      const currentConfigDescription = computed(() => {
+        const current = selectedConfigOption.value;
+        return current ? current.description : "";
+      });
+      const selectedConfigIsCustom = computed(() => !!(selectedConfigOption.value && selectedConfigOption.value.custom));
 
       async function api(path, options = {}) {
         const response = await fetch(path, {
@@ -698,12 +837,51 @@
         return typeLabelMap[type] || type;
       }
 
+      function buildSubscriptionPath() {
+        const search = new URLSearchParams();
+        if (state.selectedConfigId) {
+          search.set("config", state.selectedConfigId);
+        }
+        const suffix = search.toString();
+        return suffix ? ("/sub/openclash.yaml?" + suffix) : "/sub/openclash.yaml";
+      }
+
       function setSubUrl() {
         const url = new URL(window.location.href);
         url.pathname = "/sub/openclash.yaml";
         url.search = "";
         url.hash = "";
+        if (state.selectedConfigId) {
+          url.searchParams.set("config", state.selectedConfigId);
+        }
         state.subUrl = url.toString();
+      }
+
+      function applyTemplateForm(option) {
+        Object.assign(
+          state.templateForm,
+          option && option.custom
+            ? {
+                id: option.id || "",
+                name: option.label || "",
+                url: option.url || ""
+              }
+            : createEmptyTemplateForm()
+        );
+      }
+
+      function syncTemplateFormFromSelection() {
+        applyTemplateForm(selectedConfigOption.value);
+      }
+
+      function applySettingsResponse(payload) {
+        if (Array.isArray(payload.options) && payload.options.length) {
+          state.configOptions = payload.options;
+        }
+        state.selectedConfigId = payload.defaultConfigId || "default";
+        state.regionalGroupsUrlTestEnabled = !!payload.regionalGroupsUrlTestEnabled;
+        setSubUrl();
+        syncTemplateFormFromSelection();
       }
 
       function applyForm(upstream) {
@@ -779,6 +957,144 @@
           }
         } finally {
           state.loading.list = false;
+        }
+      }
+
+      async function loadSubscriptionSettings() {
+        state.loading.settings = true;
+        try {
+          const payload = await api("/api/subscription/settings");
+          applySettingsResponse(payload);
+        } finally {
+          state.loading.settings = false;
+        }
+      }
+
+      async function changeSubscriptionConfig(value) {
+        if (!value || state.loading.settings) {
+          return;
+        }
+
+        const previous = state.selectedConfigId;
+        state.selectedConfigId = value;
+        state.previewText = previewPlaceholder;
+        setSubUrl();
+        state.loading.settings = true;
+        try {
+          const payload = await api("/api/subscription/settings", {
+            method: "PUT",
+            body: JSON.stringify({
+              defaultConfigId: value,
+              regionalGroupsUrlTestEnabled: state.regionalGroupsUrlTestEnabled
+            })
+          });
+          applySettingsResponse(payload);
+          ElementPlus.ElMessage.success("默认生成配置已更新");
+        } catch (error) {
+          state.selectedConfigId = previous;
+          setSubUrl();
+          syncTemplateFormFromSelection();
+          ElementPlus.ElMessage.error(error.message || "配置更新失败");
+        } finally {
+          state.loading.settings = false;
+        }
+      }
+
+      async function changeRegionalGroupsUrlTest(value) {
+        if (state.loading.settings) {
+          return;
+        }
+
+        const previous = state.regionalGroupsUrlTestEnabled;
+        state.regionalGroupsUrlTestEnabled = !!value;
+        state.previewText = previewPlaceholder;
+        state.loading.settings = true;
+        try {
+          const payload = await api("/api/subscription/settings", {
+            method: "PUT",
+            body: JSON.stringify({
+              defaultConfigId: state.selectedConfigId,
+              regionalGroupsUrlTestEnabled: state.regionalGroupsUrlTestEnabled
+            })
+          });
+          applySettingsResponse(payload);
+          ElementPlus.ElMessage.success("地区组自动测速设置已更新");
+        } catch (error) {
+          state.regionalGroupsUrlTestEnabled = previous;
+          ElementPlus.ElMessage.error(error.message || "地区组自动测速设置更新失败");
+        } finally {
+          state.loading.settings = false;
+        }
+      }
+
+      function startCreateTemplate() {
+        Object.assign(state.templateForm, createEmptyTemplateForm());
+      }
+
+      async function saveTemplate() {
+        if (state.loading.template) {
+          return;
+        }
+        const name = state.templateForm.name.trim();
+        const url = state.templateForm.url.trim();
+        if (!name) {
+          ElementPlus.ElMessage.error("模板名称不能为空");
+          return;
+        }
+        if (!url) {
+          ElementPlus.ElMessage.error("模板 URL 不能为空");
+          return;
+        }
+
+        state.loading.template = true;
+        try {
+          const editing = !!state.templateForm.id;
+          const path = editing
+            ? ("/api/subscription/templates/" + encodeURIComponent(state.templateForm.id))
+            : "/api/subscription/templates";
+          const payload = await api(path, {
+            method: editing ? "PUT" : "POST",
+            body: JSON.stringify({ name, url })
+          });
+          applySettingsResponse(payload);
+          ElementPlus.ElMessage.success(editing ? "远程模板已更新" : "远程模板已创建");
+        } catch (error) {
+          ElementPlus.ElMessage.error(error.message || "远程模板保存失败");
+        } finally {
+          state.loading.template = false;
+        }
+      }
+
+      async function removeTemplate() {
+        if (!state.templateForm.id || state.loading.template) {
+          return;
+        }
+
+        try {
+          await ElementPlus.ElMessageBox.confirm(
+            "删除后该模板会从下拉框消失，确定继续吗？",
+            "删除远程模板",
+            {
+              type: "warning",
+              confirmButtonText: "删除",
+              cancelButtonText: "取消"
+            }
+          );
+        } catch (error) {
+          return;
+        }
+
+        state.loading.template = true;
+        try {
+          const payload = await api("/api/subscription/templates/" + encodeURIComponent(state.templateForm.id), {
+            method: "DELETE"
+          });
+          applySettingsResponse(payload);
+          ElementPlus.ElMessage.success("远程模板已删除");
+        } catch (error) {
+          ElementPlus.ElMessage.error(error.message || "远程模板删除失败");
+        } finally {
+          state.loading.template = false;
         }
       }
 
@@ -873,7 +1189,7 @@
         state.loading.preview = true;
         state.previewText = "生成中...";
         try {
-          const text = await api("/sub/openclash.yaml");
+          const text = await api(buildSubscriptionPath());
           state.previewText = typeof text === "string" ? text : JSON.stringify(text, null, 2);
         } catch (error) {
           state.previewText = "生成失败:\n" + (error.message || "未知错误");
@@ -912,9 +1228,10 @@
         setSubUrl();
         resetForm();
         try {
+          await loadSubscriptionSettings();
           await load();
         } catch (error) {
-          ElementPlus.ElMessage.error(error.message || "加载上游列表失败");
+          ElementPlus.ElMessage.error(error.message || "初始化页面失败");
         }
       });
 
@@ -926,10 +1243,18 @@
         enabledCount,
         clashCount,
         uriCount,
+        currentConfigLabel,
+        currentConfigDescription,
+        selectedConfigIsCustom,
         typeLabel,
         startCreate,
+        startCreateTemplate,
         selectUpstream,
+        changeSubscriptionConfig,
+        changeRegionalGroupsUrlTest,
         resetForm,
+        saveTemplate,
+        removeTemplate,
         save,
         removeCurrent,
         preview,

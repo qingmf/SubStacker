@@ -4,6 +4,7 @@ import com.substacker.service.SubscriptionService;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 
 @Path("/sub")
@@ -17,15 +18,15 @@ public class SubscriptionResource {
   @GET
   @Path("/openclash.yaml")
   @Produces("application/x-yaml")
-  public String openClashYaml() {
-    return subscriptionService.buildOpenClashYaml();
+  public String openClashYaml(@QueryParam("config") String config) {
+    return subscriptionService.buildOpenClashYaml(config);
   }
 
   @GET
   @Path("/openclash.yml")
   @Produces("application/x-yaml")
-  public String openClashYml() {
-    return subscriptionService.buildOpenClashYaml();
+  public String openClashYml(@QueryParam("config") String config) {
+    return subscriptionService.buildOpenClashYaml(config);
   }
 
   @GET
@@ -35,4 +36,3 @@ public class SubscriptionResource {
     return "ok";
   }
 }
-

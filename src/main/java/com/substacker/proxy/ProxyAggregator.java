@@ -13,24 +13,44 @@ import java.util.Objects;
 import java.util.Set;
 
 public class ProxyAggregator {
-  private final Yaml yaml;
+  private final Yaml blockYaml;
+  private final Yaml flowYaml;
 
   public ProxyAggregator() {
-    DumperOptions opts = new DumperOptions();
-    opts.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
-    opts.setPrettyFlow(true);
-    opts.setIndent(2);
-    opts.setIndicatorIndent(1);
-    opts.setDefaultScalarStyle(DumperOptions.ScalarStyle.PLAIN);
-    this.yaml = new Yaml(opts);
+    DumperOptions blockOpts = new DumperOptions();
+    blockOpts.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
+    blockOpts.setPrettyFlow(true);
+    blockOpts.setIndent(2);
+    blockOpts.setIndicatorIndent(1);
+    this.blockYaml = new Yaml(blockOpts);
+
+    DumperOptions flowOpts = new DumperOptions();
+    flowOpts.setDefaultFlowStyle(DumperOptions.FlowStyle.FLOW);
+    flowOpts.setPrettyFlow(false);
+    flowOpts.setIndent(2);
+    flowOpts.setIndicatorIndent(1);
+    flowOpts.setWidth(4096);
+    this.flowYaml = new Yaml(flowOpts);
   }
 
   public String toOpenClashYaml(List<ProxyNode> nodes) {
+    List<String> proxyNames = new ArrayList<>();
+    if (nodes != null) {
+      for (ProxyNode node : nodes) {
+        if (node != null && node.name() != null && !node.name().isBlank()) {
+          proxyNames.add(node.name());
+        }
+      }
+    }
+    return toOpenClashYaml(nodes, SubscriptionConfigProfile.DEFAULT.resolve(proxyNames));
+  }
+
+  public String toOpenClashYaml(List<ProxyNode> nodes, ResolvedSubscriptionConfig config) {
     Objects.requireNonNull(nodes, "nodes");
+    Objects.requireNonNull(config, "config");
 
     List<Map<String, Object>> proxies = new ArrayList<>();
     Set<String> seen = new LinkedHashSet<>();
-    List<String> proxyNames = new ArrayList<>();
 
     for (ProxyNode node : nodes) {
       if (node == null || node.clashProxy() == null) {
@@ -41,52 +61,64 @@ public class ProxyAggregator {
         continue;
       }
       proxies.add(node.clashProxy());
-      proxyNames.add(node.name());
     }
 
-    Map<String, Object> root = new LinkedHashMap<>();
-    root.put("mixed-port", 7890);
-    root.put("allow-lan", true);
-    root.put("mode", "rule");
-    root.put("log-level", "info");
-    root.put("external-controller", "0.0.0.0:9090");
-    root.put("secret", "");
+    Map<String, Object> root = new LinkedHashMap<>(config.rootTemplate());
+    root.remove("Proxy");
+    root.remove("Proxy Group");
+    root.remove("Rule");
+    root.putIfAbsent("mixed-port", 7890);
+    root.putIfAbsent("allow-lan", true);
+    root.putIfAbsent("mode", "rule");
+    root.putIfAbsent("log-level", "info");
+    root.putIfAbsent("external-controller", "0.0.0.0:9090");
+    root.putIfAbsent("secret", "");
 
     root.put("proxies", proxies);
-
-    List<Map<String, Object>> groups = new ArrayList<>();
-    groups.add(groupSelect("SELECT", proxyNames));
-    groups.add(groupUrlTest("AUTO", proxyNames));
-    groups.add(groupSelect("GLOBAL", List.of("SELECT", "AUTO", "DIRECT")));
-    root.put("proxy-groups", groups);
-
-    root.put("rules", List.of("MATCH,GLOBAL"));
+    root.put("proxy-groups", config.proxyGroups());
+    root.put("rules", config.rules());
+    root.put("substacker-config", config.id());
     root.put("substacker-generated-at", Instant.now().toString());
     root.put("substacker-proxy-count", proxies.size());
 
-    return yaml.dump(root);
+    return renderRoot(root);
   }
 
-  private static Map<String, Object> groupSelect(String name, List<String> proxies) {
-    Map<String, Object> g = new LinkedHashMap<>();
-    g.put("name", name);
-    g.put("type", "select");
-    List<String> list = new ArrayList<>();
-    list.add("DIRECT");
-    list.add("REJECT");
-    list.addAll(proxies);
-    g.put("proxies", list);
-    return g;
+  private String renderRoot(Map<String, Object> root) {
+    StringBuilder out = new StringBuilder();
+    for (Map.Entry<String, Object> entry : root.entrySet()) {
+      if ("proxies".equals(entry.getKey())) {
+        renderFlowList(out, entry.getKey(), entry.getValue());
+        continue;
+      }
+      if ("proxy-groups".equals(entry.getKey())) {
+        renderFlowList(out, entry.getKey(), entry.getValue());
+        continue;
+      }
+      out.append(renderEntry(entry.getKey(), entry.getValue()));
+    }
+    return out.toString();
   }
 
-  private static Map<String, Object> groupUrlTest(String name, List<String> proxies) {
-    Map<String, Object> g = new LinkedHashMap<>();
-    g.put("name", name);
-    g.put("type", "url-test");
-    g.put("url", "https://www.gstatic.com/generate_204");
-    g.put("interval", 300);
-    g.put("tolerance", 50);
-    g.put("proxies", proxies);
-    return g;
+  @SuppressWarnings("unchecked")
+  private void renderFlowList(StringBuilder out, String key, Object value) {
+    out.append(key).append(":\n");
+    if (!(value instanceof List<?> list)) {
+      return;
+    }
+    for (Object item : list) {
+      if (!(item instanceof Map<?, ?> proxy)) {
+        continue;
+      }
+      out.append("  - ");
+      out.append(flowYaml.dump((Map<String, Object>) proxy).trim());
+      out.append('\n');
+    }
+  }
+
+  private String renderEntry(String key, Object value) {
+    Map<String, Object> single = new LinkedHashMap<>();
+    single.put(key, value);
+    return blockYaml.dump(single);
   }
 }

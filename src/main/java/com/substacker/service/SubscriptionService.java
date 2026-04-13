@@ -6,6 +6,7 @@ import com.substacker.model.UpstreamType;
 import com.substacker.proxy.ClashYamlParser;
 import com.substacker.proxy.ProxyAggregator;
 import com.substacker.proxy.ProxyNode;
+import com.substacker.proxy.ResolvedSubscriptionConfig;
 import com.substacker.proxy.UpstreamParser;
 import com.substacker.proxy.UriListParser;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -28,13 +29,19 @@ public class SubscriptionService {
   private static final Logger LOG = Logger.getLogger(SubscriptionService.class);
 
   private final UpstreamService upstreamService;
+  private final SubscriptionConfigResolverService subscriptionConfigResolverService;
   private final HttpClient httpClient;
   private final List<UpstreamParser> parsers;
   private final ProxyAggregator aggregator;
   private final Yaml yaml;
 
-  public SubscriptionService(UpstreamService upstreamService, ObjectMapper objectMapper) {
+  public SubscriptionService(
+      UpstreamService upstreamService,
+      SubscriptionConfigResolverService subscriptionConfigResolverService,
+      ObjectMapper objectMapper
+  ) {
     this.upstreamService = upstreamService;
+    this.subscriptionConfigResolverService = subscriptionConfigResolverService;
     this.httpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
         .followRedirects(HttpClient.Redirect.NORMAL)
@@ -48,18 +55,25 @@ public class SubscriptionService {
   }
 
   public String buildOpenClashYaml() {
+    return buildOpenClashYaml(null);
+  }
+
+  public String buildOpenClashYaml(String requestedConfigId) {
     List<ProxyNode> nodes = collectAll();
-    return aggregator.toOpenClashYaml(nodes);
+    ResolvedSubscriptionConfig config = subscriptionConfigResolverService.resolve(requestedConfigId, nodes);
+    return aggregator.toOpenClashYaml(nodes, config);
   }
 
   public List<ProxyNode> collectAll() {
     List<ProxyNode> out = new ArrayList<>();
-    for (Upstream u : upstreamService.list()) {
+    List<Upstream> upstreams = upstreamService.list();
+    for (int i = 0; i < upstreams.size(); i++) {
+      Upstream u = upstreams.get(i);
       if (u == null || !u.enabled()) {
         continue;
       }
       try {
-        out.addAll(fetchAndParse(u));
+        out.addAll(fetchAndParse(u, i));
       } catch (Exception ignored) {
         // Upstream failures should not break the whole subscription generation.
         LOG.warnf("Upstream failed: name=%s url=%s", safeName(u), safeUrl(u));
@@ -70,7 +84,9 @@ public class SubscriptionService {
 
   public CollectReport collectReport() {
     List<UpstreamReport> reports = new ArrayList<>();
-    for (Upstream u : upstreamService.list()) {
+    List<Upstream> upstreams = upstreamService.list();
+    for (int i = 0; i < upstreams.size(); i++) {
+      Upstream u = upstreams.get(i);
       if (u == null) {
         continue;
       }
@@ -79,7 +95,7 @@ public class SubscriptionService {
         continue;
       }
       try {
-        List<ProxyNode> nodes = fetchAndParse(u);
+        List<ProxyNode> nodes = fetchAndParse(u, i);
         reports.add(UpstreamReport.ok(safeName(u), safeUrl(u), nodes.size()));
       } catch (Exception e) {
         reports.add(UpstreamReport.failed(safeName(u), safeUrl(u), e.getClass().getSimpleName() + ": " + e.getMessage()));
@@ -89,12 +105,17 @@ public class SubscriptionService {
   }
 
   public String previewFromBody(String upstreamName, UpstreamType type, String body, String contentType) {
+    return previewFromBody(upstreamName, type, body, contentType, null);
+  }
+
+  public String previewFromBody(String upstreamName, UpstreamType type, String body, String contentType, String requestedConfigId) {
     UpstreamParser parser = chooseParser(contentType, body);
     if (parser == null) {
       return "";
     }
-    List<ProxyNode> nodes = parser.parse(upstreamName, contentType, body);
-    return aggregator.toOpenClashYaml(nodes);
+    List<ProxyNode> nodes = applySourceMetadata(parser.parse(upstreamName, contentType, body), upstreamName, null, null);
+    ResolvedSubscriptionConfig config = subscriptionConfigResolverService.resolve(requestedConfigId, nodes);
+    return aggregator.toOpenClashYaml(nodes, config);
   }
 
   private UpstreamParser chooseParser(String contentType, String body) {
@@ -106,32 +127,43 @@ public class SubscriptionService {
     return null;
   }
 
-  private List<ProxyNode> fetchAndParse(Upstream upstream) throws Exception {
+  private List<ProxyNode> fetchAndParse(Upstream upstream, int sourceGroupId) throws Exception {
     Fetched fetched = fetch(upstream);
-    List<ProxyNode> direct = parseBody(upstream.name(), fetched.contentType(), fetched.body());
+    String sourceGroupName = safeName(upstream);
+    List<ProxyNode> direct = applySourceMetadata(
+        parseBody(upstream.name(), fetched.contentType(), fetched.body()),
+        sourceGroupName,
+        sourceGroupId,
+        null
+    );
     if (!direct.isEmpty()) {
       return direct;
     }
 
     // Some Clash configs have no `proxies`, but have `proxy-providers` with URLs.
-    List<String> providerUrls = tryExtractClashProviderUrls(fetched.body());
-    if (providerUrls.isEmpty()) {
+    List<ProviderRef> providers = tryExtractClashProviderUrls(fetched.body());
+    if (providers.isEmpty()) {
       return List.of();
     }
 
     List<ProxyNode> out = new ArrayList<>();
-    for (String providerUrl : providerUrls) {
+    for (ProviderRef providerRef : providers) {
       try {
         Upstream provider = new Upstream(
             upstream.id(),
-            upstream.name() + " | provider",
+            upstream.name() + " | " + providerRef.name(),
             upstream.type(),
-            providerUrl,
+            providerRef.url(),
             true,
             upstream.headers()
         );
         Fetched providerFetched = fetch(provider);
-        out.addAll(parseBody(upstream.name(), providerFetched.contentType(), providerFetched.body()));
+        out.addAll(applySourceMetadata(
+            parseBody(upstream.name(), providerFetched.contentType(), providerFetched.body()),
+            sourceGroupName,
+            sourceGroupId,
+            providerRef.name()
+        ));
       } catch (Exception ignored) {
         // ignore single provider failures
       }
@@ -147,7 +179,7 @@ public class SubscriptionService {
     return parser.parse(upstreamName, contentType, body);
   }
 
-  private List<String> tryExtractClashProviderUrls(String body) {
+  private List<ProviderRef> tryExtractClashProviderUrls(String body) {
     try {
       Object root = yaml.load(body);
       if (!(root instanceof Map<?, ?> rootMap)) {
@@ -157,8 +189,9 @@ public class SubscriptionService {
       if (!(providersObj instanceof Map<?, ?> providersMap)) {
         return List.of();
       }
-      List<String> urls = new ArrayList<>();
-      for (Object v : providersMap.values()) {
+      List<ProviderRef> providers = new ArrayList<>();
+      for (Map.Entry<?, ?> entry : providersMap.entrySet()) {
+        Object v = entry.getValue();
         if (!(v instanceof Map<?, ?> provider)) {
           continue;
         }
@@ -168,13 +201,33 @@ public class SubscriptionService {
         }
         String s = String.valueOf(url).trim();
         if (!s.isBlank()) {
-          urls.add(s);
+          String name = entry.getKey() == null ? "provider" : String.valueOf(entry.getKey()).trim();
+          providers.add(new ProviderRef(name.isBlank() ? "provider" : name, s));
         }
       }
-      return urls;
+      return providers;
     } catch (Exception ignored) {
       return List.of();
     }
+  }
+
+  private List<ProxyNode> applySourceMetadata(
+      List<ProxyNode> nodes,
+      String sourceGroupName,
+      Integer sourceGroupId,
+      String sourceProviderName
+  ) {
+    if (nodes == null || nodes.isEmpty()) {
+      return List.of();
+    }
+    List<ProxyNode> out = new ArrayList<>(nodes.size());
+    for (ProxyNode node : nodes) {
+      if (node == null) {
+        continue;
+      }
+      out.add(node.withSource(sourceGroupName, sourceGroupId, sourceProviderName));
+    }
+    return out;
   }
 
   private Fetched fetch(Upstream u) throws Exception {
@@ -225,6 +278,9 @@ public class SubscriptionService {
     public String contentType() {
       return contentType == null ? null : contentType.toLowerCase(Locale.ROOT);
     }
+  }
+
+  private record ProviderRef(String name, String url) {
   }
 
   public record UpstreamReport(String name, String url, boolean enabled, boolean ok, int nodeCount, String error) {
