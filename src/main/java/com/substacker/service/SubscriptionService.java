@@ -179,10 +179,18 @@ public class SubscriptionService {
 
   private Fetched fetch(Upstream u) throws Exception {
     if (u.type() == UpstreamType.CLASH_YAML_URL || u.type() == UpstreamType.URI_LIST_URL) {
+      boolean hasUserAgent = hasHeader(u.headers(), "User-Agent");
+      boolean hasAccept = hasHeader(u.headers(), "Accept");
       HttpRequest.Builder b = HttpRequest.newBuilder()
           .uri(URI.create(u.url()))
           .timeout(Duration.ofSeconds(20))
           .GET();
+      if (!hasUserAgent) {
+        b.header("User-Agent", "Clash.Meta");
+      }
+      if (!hasAccept) {
+        b.header("Accept", "*/*");
+      }
       if (u.headers() != null) {
         for (Map.Entry<String, String> e : u.headers().entrySet()) {
           if (e.getKey() == null || e.getKey().isBlank()) {
@@ -192,10 +200,25 @@ public class SubscriptionService {
         }
       }
       HttpResponse<String> resp = httpClient.send(b.build(), HttpResponse.BodyHandlers.ofString());
+      if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
+        throw new IllegalStateException("HTTP " + resp.statusCode());
+      }
       String ct = resp.headers().firstValue("content-type").orElse(null);
       return new Fetched(ct, resp.body() == null ? "" : resp.body());
     }
     throw new IllegalArgumentException("Unsupported upstream type: " + u.type());
+  }
+
+  private static boolean hasHeader(Map<String, String> headers, String name) {
+    if (headers == null || headers.isEmpty()) {
+      return false;
+    }
+    for (String key : headers.keySet()) {
+      if (key != null && key.equalsIgnoreCase(name)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private record Fetched(String contentType, String body) {

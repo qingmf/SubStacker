@@ -3,249 +3,941 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>SubStacker - 上游配置</title>
+  <title>SubStacker 控制台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%232153ff'/%3E%3Cstop offset='1' stop-color='%230f9f78'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='18' fill='%230d1424'/%3E%3Cpath d='M18 20h22c6.6 0 12 5.4 12 12s-5.4 12-12 12H30v8H18V20zm12 12h10a4 4 0 1 0 0-8H30v8z' fill='url(%23g)'/%3E%3C/svg%3E"/>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus/dist/index.css"/>
   <style>
-    :root { color-scheme: light dark; }
-    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 0; }
-    header { padding: 16px 20px; border-bottom: 1px solid rgba(127,127,127,.25); }
-    main { padding: 20px; max-width: 1100px; margin: 0 auto; }
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .card { border: 1px solid rgba(127,127,127,.25); border-radius: 10px; padding: 14px; }
-    label { display:block; font-size: 12px; opacity: .8; margin-bottom: 6px; }
-    input, select, textarea { width: 100%; box-sizing: border-box; padding: 10px; border-radius: 8px; border: 1px solid rgba(127,127,127,.35); background: transparent; }
-    textarea { min-height: 110px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-    button { padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(127,127,127,.35); background: transparent; cursor: pointer; }
-    button.primary { background: rgba(0,120,255,.12); border-color: rgba(0,120,255,.35); }
-    button.danger { background: rgba(255,0,0,.08); border-color: rgba(255,0,0,.35); }
-    .list { display: grid; gap: 10px; }
-    .item { display:flex; align-items:center; justify-content:space-between; gap: 10px; padding: 10px; border-radius: 10px; border: 1px solid rgba(127,127,127,.25); }
-    .item small { opacity:.7 }
-    .actions { display:flex; gap: 8px; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-    .hint { font-size: 12px; opacity: .75; line-height: 1.5; }
-    pre { margin: 0; padding: 12px; border-radius: 10px; border: 1px solid rgba(127,127,127,.25); overflow:auto; }
-    @media (max-width: 900px) { .row { grid-template-columns: 1fr; } }
+    :root {
+      color-scheme: light;
+      --el-color-primary: #2153ff;
+      --el-color-success: #0f9f78;
+      --el-color-warning: #f58f00;
+      --el-color-danger: #d4382d;
+      --el-border-radius-base: 14px;
+      --el-border-radius-small: 12px;
+      --el-border-radius-round: 999px;
+      --el-font-size-base: 14px;
+      --page-bg: #f4efe7;
+      --ink: #172033;
+      --muted: #5b6475;
+      --panel: rgba(255, 255, 255, 0.88);
+      --panel-border: rgba(23, 32, 51, 0.08);
+      --panel-shadow: 0 24px 70px rgba(23, 32, 51, 0.12);
+      --mono: "JetBrains Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      --sans: "Avenir Next", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      min-height: 100%;
+      margin: 0;
+    }
+
+    body {
+      font-family: var(--sans);
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(33, 83, 255, 0.16), transparent 28%),
+        radial-gradient(circle at top right, rgba(15, 159, 120, 0.14), transparent 26%),
+        linear-gradient(135deg, #f5efe6 0%, #edf4fb 52%, #f7f7fb 100%);
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.35;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+      background-size: 36px 36px;
+      mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.9), transparent 88%);
+    }
+
+    #app {
+      position: relative;
+      min-height: 100vh;
+      padding: 32px 20px 48px;
+    }
+
+    .shell {
+      max-width: 1240px;
+      margin: 0 auto;
+      display: grid;
+      gap: 24px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 28px;
+      border: 1px solid rgba(255, 255, 255, 0.75);
+      border-radius: 32px;
+      background:
+        linear-gradient(160deg, rgba(13, 20, 36, 0.96) 0%, rgba(26, 44, 90, 0.88) 52%, rgba(10, 146, 124, 0.82) 100%);
+      box-shadow: 0 30px 90px rgba(12, 20, 42, 0.28);
+      color: #f8fbff;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -70px;
+      top: -40px;
+      width: 240px;
+      height: 240px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(255, 255, 255, 0.24), transparent 68%);
+      filter: blur(4px);
+      opacity: 0.9;
+    }
+
+    .hero-top {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      justify-content: space-between;
+      gap: 28px;
+      align-items: flex-start;
+    }
+
+    .brand {
+      max-width: 680px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .brand h1 {
+      margin: 18px 0 10px;
+      font-size: clamp(34px, 6vw, 52px);
+      line-height: 1.02;
+      letter-spacing: -0.04em;
+    }
+
+    .brand p {
+      margin: 0;
+      max-width: 52ch;
+      font-size: 16px;
+      line-height: 1.7;
+      color: rgba(248, 251, 255, 0.82);
+    }
+
+    .type-tags {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }
+
+    .sub-link-card {
+      position: relative;
+      z-index: 1;
+      min-width: 320px;
+      max-width: 420px;
+      padding: 18px;
+      border-radius: 24px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      backdrop-filter: blur(18px);
+    }
+
+    .section-kicker {
+      margin-bottom: 10px;
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(248, 251, 255, 0.68);
+    }
+
+    .helper {
+      margin-top: 10px;
+      color: rgba(248, 251, 255, 0.74);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .metrics {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 24px;
+    }
+
+    .metric-card {
+      padding: 18px;
+      border-radius: 24px;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      backdrop-filter: blur(14px);
+    }
+
+    .metric-label {
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(248, 251, 255, 0.64);
+    }
+
+    .metric-value {
+      margin-top: 10px;
+      font-size: 30px;
+      font-weight: 700;
+      letter-spacing: -0.05em;
+    }
+
+    .metric-note {
+      margin-top: 8px;
+      font-size: 13px;
+      color: rgba(248, 251, 255, 0.7);
+    }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
+      gap: 24px;
+      align-items: start;
+    }
+
+    .panel-grid {
+      display: grid;
+      gap: 24px;
+    }
+
+    .panel {
+      padding: 24px;
+      border-radius: 30px;
+      border: 1px solid var(--panel-border);
+      background: var(--panel);
+      backdrop-filter: blur(20px);
+      box-shadow: var(--panel-shadow);
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 18px;
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+    }
+
+    .subtle {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .list-wrap {
+      display: grid;
+      gap: 12px;
+      max-height: 620px;
+      overflow: auto;
+      padding-right: 4px;
+    }
+
+    .upstream-card {
+      padding: 18px;
+      border-radius: 22px;
+      border: 1px solid rgba(23, 32, 51, 0.08);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 249, 252, 0.98));
+      cursor: pointer;
+      transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+    }
+
+    .upstream-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(33, 83, 255, 0.22);
+      box-shadow: 0 18px 40px rgba(33, 83, 255, 0.1);
+    }
+
+    .upstream-card.is-active {
+      border-color: rgba(33, 83, 255, 0.46);
+      background: linear-gradient(180deg, rgba(237, 243, 255, 0.98), rgba(255, 255, 255, 0.98));
+      box-shadow: 0 18px 38px rgba(33, 83, 255, 0.14);
+    }
+
+    .upstream-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .upstream-name {
+      min-width: 0;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .upstream-meta {
+      margin-top: 14px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .url-line {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(23, 32, 51, 0.06);
+      color: #32405f;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.6;
+      word-break: break-all;
+    }
+
+    .form-split {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 16px;
+    }
+
+    .switch-note {
+      margin-left: 12px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .switch-field {
+      min-height: 40px;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .form-actions,
+    .preview-actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }
+
+    .mono-field .el-input__inner,
+    .mono-field .el-textarea__inner,
+    .mono-surface {
+      font-family: var(--mono);
+    }
+
+    .preview-box {
+      min-height: 320px;
+      margin: 0;
+      padding: 20px;
+      border-radius: 24px;
+      background:
+        linear-gradient(180deg, rgba(10, 15, 29, 0.98), rgba(18, 30, 60, 0.98));
+      color: #e6efff;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.75;
+      overflow: auto;
+      white-space: pre-wrap;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    }
+
+    .preview-box.is-placeholder {
+      color: rgba(230, 239, 255, 0.72);
+    }
+
+    .footer-note {
+      color: #4f5970;
+      font-size: 13px;
+      line-height: 1.7;
+      text-align: center;
+    }
+
+    .empty-shell {
+      padding: 28px 0 8px;
+    }
+
+    .muted-tag {
+      background: rgba(23, 32, 51, 0.06);
+      color: #33405a;
+      border-color: transparent;
+    }
+
+    .hero .el-input__wrapper {
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: none;
+    }
+
+    .panel .el-input__wrapper,
+    .panel .el-textarea__inner,
+    .panel .el-select__wrapper {
+      box-shadow: 0 0 0 1px rgba(23, 32, 51, 0.08) inset;
+      background: rgba(255, 255, 255, 0.88);
+    }
+
+    .panel .el-input__wrapper:hover,
+    .panel .el-textarea__inner:hover,
+    .panel .el-select__wrapper:hover {
+      box-shadow: 0 0 0 1px rgba(33, 83, 255, 0.22) inset;
+    }
+
+    .panel .el-alert {
+      margin-top: 18px;
+      border-radius: 18px;
+      background: rgba(33, 83, 255, 0.08);
+    }
+
+    @media (max-width: 1100px) {
+      .metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .main-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 760px) {
+      #app {
+        padding: 18px 14px 32px;
+      }
+
+      .hero,
+      .panel {
+        padding: 18px;
+        border-radius: 24px;
+      }
+
+      .hero-top,
+      .panel-header {
+        flex-direction: column;
+      }
+
+      .sub-link-card {
+        min-width: 0;
+        width: 100%;
+      }
+
+      .metrics,
+      .form-split {
+        grid-template-columns: 1fr;
+      }
+
+      .form-actions .el-button,
+      .preview-actions .el-button {
+        flex: 1 1 100%;
+      }
+    }
   </style>
 </head>
 <body>
-<header>
-  <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-    <div>
-      <div style="font-weight:700;">SubStacker</div>
-      <div class="hint">机场订阅聚合器：配置多个上游，生成 OpenClash 可用的订阅 YAML。</div>
-    </div>
-    <div class="mono" id="subUrl"></div>
+<div id="app">
+  <div class="shell">
+    <section class="hero">
+      <div class="hero-top">
+        <div class="brand">
+          <div class="eyebrow">Subscription Control Center</div>
+          <h1>SubStacker</h1>
+          <p>管理多个机场上游，聚合输出一条给 OpenClash 直接订阅的 Clash YAML。页面换成了成熟组件体系，但后端接口和数据格式保持不变。</p>
+          <div class="type-tags">
+            <el-tag round effect="dark">CLASH_YAML_URL</el-tag>
+            <el-tag round effect="dark" type="success">URI_LIST_URL</el-tag>
+          </div>
+        </div>
+
+        <div class="sub-link-card">
+          <div class="section-kicker">OpenClash Subscription</div>
+          <el-input class="mono-field" :model-value="subUrl" readonly size="large">
+            <template #append>
+              <el-button @click="copySubUrl">复制</el-button>
+            </template>
+          </el-input>
+          <div class="helper">把这条地址配置到 OpenClash。修改上游后，可以直接在下方预览区刷新订阅结果。</div>
+        </div>
+      </div>
+
+      <div class="metrics">
+        <article class="metric-card">
+          <div class="metric-label">Total Upstreams</div>
+          <div class="metric-value">{{ totalCount }}</div>
+          <div class="metric-note">当前系统里登记的全部上游数量。</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">Enabled</div>
+          <div class="metric-value">{{ enabledCount }}</div>
+          <div class="metric-note">启用状态的上游会参与最终聚合。</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">Clash YAML</div>
+          <div class="metric-value">{{ clashCount }}</div>
+          <div class="metric-note">直接读取 `proxies` 节点列表。</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">URI List</div>
+          <div class="metric-value">{{ uriCount }}</div>
+          <div class="metric-note">支持 `ss://`、`vmess://`、`trojan://`。</div>
+        </article>
+      </div>
+    </section>
+
+    <section class="main-grid">
+      <aside class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">上游列表</div>
+            <div class="subtle">点击左侧卡片进入编辑态。列表视图保留了原有全部 CRUD 功能。</div>
+          </div>
+          <el-button type="primary" plain @click="startCreate">新建上游</el-button>
+        </div>
+
+        <el-skeleton v-if="loading.list" :rows="7" animated></el-skeleton>
+
+        <div v-else-if="!upstreams.length" class="empty-shell">
+          <el-empty description="还没有配置任何上游">
+            <el-button type="primary" @click="startCreate">立即添加</el-button>
+          </el-empty>
+        </div>
+
+        <div v-else class="list-wrap">
+          <article
+            v-for="item in upstreams"
+            :key="item.id"
+            class="upstream-card"
+            :class="{ 'is-active': editingId === item.id }"
+            @click="selectUpstream(item)"
+          >
+            <div class="upstream-title">
+              <div class="upstream-name">{{ item.name || item.id }}</div>
+              <el-tag :type="item.enabled ? 'success' : 'info'" round>{{ item.enabled ? '已启用' : '已停用' }}</el-tag>
+            </div>
+            <div class="upstream-meta">
+              <el-tag round effect="plain" class="muted-tag">{{ typeLabel(item.type) }}</el-tag>
+              <span>ID: {{ item.id }}</span>
+            </div>
+            <div class="url-line">{{ item.url }}</div>
+          </article>
+        </div>
+      </aside>
+
+      <div class="panel-grid">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">{{ editingId ? "编辑上游" : "新建上游" }}</div>
+              <div class="subtle">{{ editingId ? "当前正在修改已存在的上游配置。" : "新增一个上游订阅来源，保存后立即写入状态文件。" }}</div>
+            </div>
+            <el-tag v-if="editingId" type="warning" effect="dark" round>Editing</el-tag>
+          </div>
+
+          <el-form label-position="top">
+            <el-form-item label="名称">
+              <el-input v-model="form.name" placeholder="例如：主机场 / 备用 / 自建节点" clearable></el-input>
+            </el-form-item>
+
+            <div class="form-split">
+              <el-form-item label="类型">
+                <el-select v-model="form.type" placeholder="选择上游类型">
+                  <el-option
+                    v-for="option in typeOptions"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  ></el-option>
+                </el-select>
+              </el-form-item>
+
+              <el-form-item label="启用状态">
+                <div class="switch-field">
+                  <el-switch v-model="form.enabled" inline-prompt active-text="开" inactive-text="关"></el-switch>
+                  <span class="switch-note">{{ form.enabled ? "当前会参与聚合输出。" : "当前仅保存配置，不参与聚合。" }}</span>
+                </div>
+              </el-form-item>
+            </div>
+
+            <el-form-item label="URL">
+              <el-input v-model="form.url" class="mono-field" placeholder="https://example.com/sub?token=..." clearable></el-input>
+            </el-form-item>
+
+            <el-form-item label="Headers (JSON，可选)">
+              <el-input
+                v-model="form.headersText"
+                class="mono-field"
+                type="textarea"
+                :autosize="{ minRows: 5, maxRows: 10 }"
+                placeholder='{"User-Agent":"clash"}'
+              ></el-input>
+            </el-form-item>
+
+            <el-alert :closable="false" show-icon>
+              <template #title>
+                {{ form.type === "CLASH_YAML_URL"
+                  ? "读取上游 Clash YAML 中的 proxies 列表。"
+                  : "读取 URI 列表或 Base64(URI 列表)，支持 ss / vmess / trojan。" }}
+              </template>
+            </el-alert>
+
+            <div class="form-actions">
+              <el-button type="primary" :loading="loading.save" @click="save">保存</el-button>
+              <el-button @click="resetForm">取消</el-button>
+              <el-button type="danger" plain :disabled="!editingId" :loading="loading.delete" @click="removeCurrent">删除</el-button>
+              <el-button type="success" plain :loading="loading.preview" @click="preview">预览生成 YAML</el-button>
+            </div>
+          </el-form>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">生成预览</div>
+              <div class="subtle">直接查看 `/sub/openclash.yaml` 当前输出，方便复制、排查和校验生成结果。</div>
+            </div>
+            <div class="preview-actions">
+              <el-button @click="copyPreview">复制</el-button>
+              <el-button type="primary" plain :loading="loading.preview" @click="preview">刷新订阅</el-button>
+            </div>
+          </div>
+
+          <pre class="preview-box" :class="{ 'is-placeholder': previewText === previewPlaceholder }">{{ previewText }}</pre>
+        </section>
+      </div>
+    </section>
+
+    <div class="footer-note">前端已切到组件化 UI，接口仍然使用 `/api/upstreams` 和 `/sub/openclash.yaml`，不需要改后端调用方式。</div>
   </div>
-</header>
-<main>
-  <div class="row">
-    <div class="card">
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
-        <div style="font-weight:700;">上游列表</div>
-        <button class="primary" id="newBtn">新建</button>
-      </div>
-      <div class="list" id="list"></div>
-      <div class="hint" style="margin-top:10px;">
-        支持类型：
-        <span class="mono">CLASH_YAML_URL</span>（上游是 Clash YAML）、
-        <span class="mono">URI_LIST_URL</span>（上游是 URI 列表或 base64(URI 列表)，包含 ss/vmess/trojan）。
-      </div>
-    </div>
+</div>
 
-    <div class="card">
-      <div style="font-weight:700; margin-bottom:10px;" id="formTitle">新建上游</div>
-      <input type="hidden" id="id"/>
-      <div style="display:grid; gap:10px;">
-        <div>
-          <label>名称</label>
-          <input id="name" placeholder="例如：主机场 / 备用 / 自建节点"/>
-        </div>
-        <div>
-          <label>类型</label>
-          <select id="type">
-            <option value="CLASH_YAML_URL">CLASH_YAML_URL</option>
-            <option value="URI_LIST_URL">URI_LIST_URL</option>
-          </select>
-        </div>
-        <div>
-          <label>URL</label>
-          <input id="url" class="mono" placeholder="https://example.com/sub?token=..."/>
-        </div>
-        <div>
-          <label>启用</label>
-          <select id="enabled">
-            <option value="true">true</option>
-            <option value="false">false</option>
-          </select>
-        </div>
-        <div>
-          <label>Headers (JSON，可选)</label>
-          <textarea id="headers" placeholder='{"User-Agent":"clash"}'></textarea>
-          <div class="hint">用于某些订阅需要自定义请求头；留空表示不设置。</div>
-        </div>
-
-        <div style="display:flex; gap:10px; flex-wrap:wrap;">
-          <button class="primary" id="saveBtn">保存</button>
-          <button id="cancelBtn">取消</button>
-          <button class="danger" id="deleteBtn" style="display:none;">删除</button>
-          <button id="previewBtn">预览生成 YAML</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="card" style="margin-top:16px;">
-    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px;">
-      <div style="font-weight:700;">预览</div>
-      <div class="actions">
-        <button id="copyBtn">复制</button>
-        <button id="refreshBtn">刷新订阅</button>
-      </div>
-    </div>
-    <pre class="mono" id="preview" style="min-height:180px;">点击“预览生成 YAML”或“刷新订阅”。</pre>
-  </div>
-</main>
-
+<script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/element-plus/dist/index.full.min.js"></script>
 <script>
-  const $ = (id) => document.getElementById(id);
-  const state = { upstreams: [], editing: null };
+  const { createApp, reactive, computed, onMounted, toRefs } = Vue;
 
-  function api(path, opts = {}) {
-    return fetch(path, { headers: { "Content-Type": "application/json" }, ...opts })
-      .then(async r => {
-        const ct = r.headers.get("content-type") || "";
-        if (!r.ok) {
-          const msg = ct.includes("application/json") ? (await r.json()).message : await r.text();
-          throw new Error(msg || ("HTTP " + r.status));
-        }
-        if (ct.includes("application/json")) return r.json();
-        return r.text();
+  createApp({
+    setup() {
+      const previewPlaceholder = "点击“预览生成 YAML”或“刷新订阅”。";
+      const typeOptions = [
+        { value: "CLASH_YAML_URL", label: "CLASH_YAML_URL" },
+        { value: "URI_LIST_URL", label: "URI_LIST_URL" }
+      ];
+      const typeLabelMap = {
+        CLASH_YAML_URL: "Clash YAML",
+        URI_LIST_URL: "URI 列表"
+      };
+      const createEmptyForm = () => ({
+        id: "",
+        name: "",
+        type: "CLASH_YAML_URL",
+        url: "",
+        enabled: true,
+        headersText: ""
       });
-  }
 
-  function setSubUrl() {
-    const url = new URL(window.location.href);
-    url.pathname = "/sub/openclash.yaml";
-    url.search = "";
-    url.hash = "";
-    $("subUrl").textContent = url.toString();
-  }
+      const state = reactive({
+        upstreams: [],
+        form: createEmptyForm(),
+        editingId: null,
+        subUrl: "",
+        previewText: previewPlaceholder,
+        loading: {
+          list: false,
+          save: false,
+          delete: false,
+          preview: false
+        }
+      });
 
-  function renderList() {
-    const el = $("list");
-    el.innerHTML = "";
-    if (!state.upstreams.length) {
-      el.innerHTML = "<div class='hint'>暂无上游，点击“新建”添加。</div>";
-      return;
+      const totalCount = computed(() => state.upstreams.length);
+      const enabledCount = computed(() => state.upstreams.filter((item) => item.enabled).length);
+      const clashCount = computed(() => state.upstreams.filter((item) => item.type === "CLASH_YAML_URL").length);
+      const uriCount = computed(() => state.upstreams.filter((item) => item.type === "URI_LIST_URL").length);
+
+      async function api(path, options = {}) {
+        const response = await fetch(path, {
+          headers: { "Content-Type": "application/json" },
+          ...options
+        });
+        const contentType = response.headers.get("content-type") || "";
+        if (!response.ok) {
+          const message = contentType.includes("application/json")
+            ? (await response.json()).message
+            : await response.text();
+          throw new Error(message || ("HTTP " + response.status));
+        }
+        return contentType.includes("application/json") ? response.json() : response.text();
+      }
+
+      function typeLabel(type) {
+        return typeLabelMap[type] || type;
+      }
+
+      function setSubUrl() {
+        const url = new URL(window.location.href);
+        url.pathname = "/sub/openclash.yaml";
+        url.search = "";
+        url.hash = "";
+        state.subUrl = url.toString();
+      }
+
+      function applyForm(upstream) {
+        Object.assign(
+          state.form,
+          upstream
+            ? {
+                id: upstream.id || "",
+                name: upstream.name || "",
+                type: upstream.type || "CLASH_YAML_URL",
+                url: upstream.url || "",
+                enabled: !!upstream.enabled,
+                headersText: upstream.headers ? JSON.stringify(upstream.headers, null, 2) : ""
+              }
+            : createEmptyForm()
+        );
+      }
+
+      function resetForm() {
+        state.editingId = null;
+        applyForm(null);
+      }
+
+      function startCreate() {
+        resetForm();
+      }
+
+      function selectUpstream(item) {
+        state.editingId = item.id;
+        applyForm(item);
+      }
+
+      function parseHeaders() {
+        const raw = state.form.headersText.trim();
+        if (!raw) {
+          return null;
+        }
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch (error) {
+          throw new Error("Headers 必须是合法 JSON");
+        }
+        if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+          throw new Error("Headers 必须是 JSON 对象");
+        }
+        return parsed;
+      }
+
+      function buildPayload() {
+        return {
+          id: state.form.id.trim() || null,
+          name: state.form.name.trim(),
+          type: state.form.type,
+          url: state.form.url.trim(),
+          enabled: !!state.form.enabled,
+          headers: parseHeaders()
+        };
+      }
+
+      async function load() {
+        state.loading.list = true;
+        try {
+          const list = await api("/api/upstreams");
+          state.upstreams = Array.isArray(list) ? list : [];
+          if (state.editingId) {
+            const current = state.upstreams.find((item) => item.id === state.editingId);
+            if (current) {
+              applyForm(current);
+            } else {
+              resetForm();
+            }
+          }
+        } finally {
+          state.loading.list = false;
+        }
+      }
+
+      async function save() {
+        if (state.loading.save) {
+          return;
+        }
+
+        state.loading.save = true;
+        try {
+          const payload = buildPayload();
+          if (!payload.name) {
+            throw new Error("名称不能为空");
+          }
+          if (!payload.url) {
+            throw new Error("URL 不能为空");
+          }
+
+          let savedId = state.editingId;
+          if (state.editingId) {
+            const updated = await api("/api/upstreams/" + encodeURIComponent(state.editingId), {
+              method: "PUT",
+              body: JSON.stringify(payload)
+            });
+            savedId = updated.id || state.editingId;
+            ElementPlus.ElMessage.success("上游已更新");
+          } else {
+            const created = await api("/api/upstreams", {
+              method: "POST",
+              body: JSON.stringify(payload)
+            });
+            savedId = created.id || null;
+            ElementPlus.ElMessage.success("上游已创建");
+          }
+
+          await load();
+          if (savedId) {
+            const current = state.upstreams.find((item) => item.id === savedId);
+            if (current) {
+              state.editingId = current.id;
+              applyForm(current);
+            }
+          } else {
+            resetForm();
+          }
+        } catch (error) {
+          ElementPlus.ElMessage.error(error.message || "保存失败");
+        } finally {
+          state.loading.save = false;
+        }
+      }
+
+      async function removeCurrent() {
+        if (!state.editingId || state.loading.delete) {
+          return;
+        }
+
+        try {
+          await ElementPlus.ElMessageBox.confirm(
+            "删除后需要重新创建才能恢复，确定继续吗？",
+            "删除上游",
+            {
+              type: "warning",
+              confirmButtonText: "删除",
+              cancelButtonText: "取消"
+            }
+          );
+        } catch (error) {
+          return;
+        }
+
+        state.loading.delete = true;
+        try {
+          await api("/api/upstreams/" + encodeURIComponent(state.editingId), {
+            method: "DELETE"
+          });
+          resetForm();
+          await load();
+          ElementPlus.ElMessage.success("上游已删除");
+        } catch (error) {
+          ElementPlus.ElMessage.error(error.message || "删除失败");
+        } finally {
+          state.loading.delete = false;
+        }
+      }
+
+      async function preview() {
+        if (state.loading.preview) {
+          return;
+        }
+
+        state.loading.preview = true;
+        state.previewText = "生成中...";
+        try {
+          const text = await api("/sub/openclash.yaml");
+          state.previewText = typeof text === "string" ? text : JSON.stringify(text, null, 2);
+        } catch (error) {
+          state.previewText = "生成失败:\n" + (error.message || "未知错误");
+          ElementPlus.ElMessage.error(error.message || "订阅生成失败");
+        } finally {
+          state.loading.preview = false;
+        }
+      }
+
+      async function copyText(text, successMessage) {
+        try {
+          await navigator.clipboard.writeText(text);
+          ElementPlus.ElMessage.success(successMessage);
+        } catch (error) {
+          ElementPlus.ElMessage.error("复制失败，请检查浏览器剪贴板权限");
+        }
+      }
+
+      async function copySubUrl() {
+        if (!state.subUrl) {
+          ElementPlus.ElMessage.warning("订阅地址尚未生成");
+          return;
+        }
+        await copyText(state.subUrl, "订阅地址已复制");
+      }
+
+      async function copyPreview() {
+        if (!state.previewText || state.previewText === previewPlaceholder) {
+          ElementPlus.ElMessage.warning("暂无可复制的预览内容");
+          return;
+        }
+        await copyText(state.previewText, "预览内容已复制");
+      }
+
+      onMounted(async () => {
+        setSubUrl();
+        resetForm();
+        try {
+          await load();
+        } catch (error) {
+          ElementPlus.ElMessage.error(error.message || "加载上游列表失败");
+        }
+      });
+
+      return {
+        ...toRefs(state),
+        previewPlaceholder,
+        typeOptions,
+        totalCount,
+        enabledCount,
+        clashCount,
+        uriCount,
+        typeLabel,
+        startCreate,
+        selectUpstream,
+        resetForm,
+        save,
+        removeCurrent,
+        preview,
+        copySubUrl,
+        copyPreview
+      };
     }
-    for (const u of state.upstreams) {
-      const div = document.createElement("div");
-      div.className = "item";
-      div.innerHTML = `
-        <div style="min-width:0;">
-          <div style="font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(u.name || u.id)}</div>
-          <small class="mono">${escapeHtml(u.type)} | ${u.enabled ? "enabled" : "disabled"}</small>
-          <div class="mono" style="font-size:12px; opacity:.75; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(u.url || "")}</div>
-        </div>
-        <div class="actions">
-          <button data-id="${u.id}">编辑</button>
-        </div>
-      `;
-      div.querySelector("button").addEventListener("click", () => edit(u.id));
-      el.appendChild(div);
-    }
-  }
-
-  function resetForm() {
-    state.editing = null;
-    $("formTitle").textContent = "新建上游";
-    $("id").value = "";
-    $("name").value = "";
-    $("type").value = "CLASH_YAML_URL";
-    $("url").value = "";
-    $("enabled").value = "true";
-    $("headers").value = "";
-    $("deleteBtn").style.display = "none";
-  }
-
-  function edit(id) {
-    const u = state.upstreams.find(x => x.id === id);
-    if (!u) return;
-    state.editing = u;
-    $("formTitle").textContent = "编辑上游";
-    $("id").value = u.id;
-    $("name").value = u.name || "";
-    $("type").value = u.type || "CLASH_YAML_URL";
-    $("url").value = u.url || "";
-    $("enabled").value = String(!!u.enabled);
-    $("headers").value = u.headers ? JSON.stringify(u.headers, null, 2) : "";
-    $("deleteBtn").style.display = "";
-  }
-
-  async function load() {
-    state.upstreams = await api("/api/upstreams");
-    renderList();
-  }
-
-  function readForm() {
-    let headers = null;
-    const rawHeaders = $("headers").value.trim();
-    if (rawHeaders) headers = JSON.parse(rawHeaders);
-    return {
-      id: $("id").value.trim() || null,
-      name: $("name").value.trim(),
-      type: $("type").value,
-      url: $("url").value.trim(),
-      enabled: $("enabled").value === "true",
-      headers
-    };
-  }
-
-  async function save() {
-    const body = readForm();
-    if (!body.name) throw new Error("名称不能为空");
-    if (!body.url) throw new Error("URL 不能为空");
-    if (state.editing) {
-      await api("/api/upstreams/" + encodeURIComponent(state.editing.id), { method: "PUT", body: JSON.stringify(body) });
-    } else {
-      await api("/api/upstreams", { method: "POST", body: JSON.stringify(body) });
-    }
-    resetForm();
-    await load();
-  }
-
-  async function del() {
-    if (!state.editing) return;
-    if (!confirm("确定删除这个上游？")) return;
-    await api("/api/upstreams/" + encodeURIComponent(state.editing.id), { method: "DELETE" });
-    resetForm();
-    await load();
-  }
-
-  async function preview() {
-    $("preview").textContent = "生成中...";
-    const text = await api("/sub/openclash.yaml");
-    $("preview").textContent = text;
-  }
-
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
-  }
-
-  $("newBtn").addEventListener("click", resetForm);
-  $("cancelBtn").addEventListener("click", resetForm);
-  $("saveBtn").addEventListener("click", () => save().catch(e => alert(e.message)));
-  $("deleteBtn").addEventListener("click", () => del().catch(e => alert(e.message)));
-  $("previewBtn").addEventListener("click", () => preview().catch(e => alert(e.message)));
-  $("refreshBtn").addEventListener("click", () => preview().catch(e => alert(e.message)));
-  $("copyBtn").addEventListener("click", async () => {
-    await navigator.clipboard.writeText($("preview").textContent);
-  });
-
-  setSubUrl();
-  resetForm();
-  load().catch(e => alert(e.message));
+  }).use(ElementPlus).mount("#app");
 </script>
 </body>
 </html>
-

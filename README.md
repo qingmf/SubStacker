@@ -8,7 +8,14 @@
 - 聚合并去重节点，生成 OpenClash 可用的 `openclash.yaml`
 - 上游格式（当前版本）
   - `CLASH_YAML_URL`：上游为 Clash YAML（读取 `proxies:`）
-  - `URI_LIST_URL`：上游为 URI 列表或 base64(URI 列表)，支持 `ss://` / `vmess://` / `trojan://`
+  - `URI_LIST_URL`：上游为 URI 列表或 base64(URI 列表)，支持：
+    - `ss://`（兼容传统整段 base64 和 SIP002 `userinfo@host:port` 写法，含常见 plugin 参数）
+    - `ssr://`
+    - `vmess://`（兼容标准 JSON 链接和 URI 风格链接）
+    - `trojan://`
+    - `vless://`
+    - `hy2://` / `hysteria2://`
+    - `tuic://`
 
 ## 运行（开发模式）
 
@@ -38,4 +45,3 @@ mvn quarkus:dev
 ## 开发记录
 
 见：`docs/DEVLOG.md`
-
