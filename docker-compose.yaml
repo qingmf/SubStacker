@@ -16,6 +16,8 @@ services:
     networks:
       default:
         ipv4_address: 192.168.3.5
+        # 👇 就加这一行，固定 MAC 地址
+        mac_address: "02:42:C0:A8:03:05"
 
 volumes:
   substacker-data:
