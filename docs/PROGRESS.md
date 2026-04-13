@@ -19,3 +19,4 @@
   - `!!GROUPID` / `!!GROUP` / `!!PROVIDER`
 - 暂未实现对外部 `subconverter` INI 配置文件全部高级语法的完整兼容，尤其是 `script:` / `!!INSERT` / `ssid`
 - 新增页面级开关：可将地区类 `proxy group` 自动切换为 `url-test`
+- README 已补充私有仓库拉取、开发启动、Docker Compose 启动的详细步骤
