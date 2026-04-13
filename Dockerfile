@@ -1,5 +1,8 @@
 FROM quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-21 AS build
 
+USER root
+RUN microdnf install -y maven && microdnf clean all
+
 WORKDIR /project
 
 COPY pom.xml ./
