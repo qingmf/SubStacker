@@ -354,10 +354,14 @@ public class SubscriptionConfigResolverService {
       }
       if (trimmed.startsWith("[]")) {
         String inner = normalizeSelectorPattern(trimmed.substring(2));
-        if (looksLikeRegexSelector(inner)) {
-          addRegexMatches(inner, availableNodes, resolved);
+        if (inner.equalsIgnoreCase("ALL")) {
+          resolved.addAll(allProxyNames);
         } else if (!inner.isBlank()) {
-          resolved.add(inner);
+          int before = resolved.size();
+          addRegexMatches(inner, availableNodes, resolved);
+          if (resolved.size() == before) {
+            resolved.add(inner);
+          }
         }
         continue;
       }
