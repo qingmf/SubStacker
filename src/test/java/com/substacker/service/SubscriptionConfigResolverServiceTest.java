@@ -1,8 +1,10 @@
 package com.substacker.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.substacker.proxy.ProxyNode;
 import com.substacker.proxy.ResolvedSubscriptionConfig;
 import com.substacker.model.SubscriptionSettings;
+import com.substacker.store.DownloadCacheStore;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -42,7 +44,8 @@ class SubscriptionConfigResolverServiceTest {
         ruleset=GLOBAL,[]FINAL
         """);
 
-    SubscriptionConfigResolverService resolver = new SubscriptionConfigResolverService(null);
+    DownloadCacheStore cacheStore = new DownloadCacheStore(new ObjectMapper(), dir.resolve("download-cache.json"));
+    SubscriptionConfigResolverService resolver = new SubscriptionConfigResolverService(null, new HttpFetchService(cacheStore));
     List<ProxyNode> nodes = List.of(
         node("HK-01", "hk", "Main", 0, null),
         node("JP-01", "jp", "Main", 0, null)
@@ -79,7 +82,8 @@ class SubscriptionConfigResolverServiceTest {
         custom_proxy_group=OnlyAlphaProvider`select`!!PROVIDER=alpha
         """);
 
-    SubscriptionConfigResolverService resolver = new SubscriptionConfigResolverService(null);
+    DownloadCacheStore cacheStore = new DownloadCacheStore(new ObjectMapper(), dir.resolve("download-cache.json"));
+    SubscriptionConfigResolverService resolver = new SubscriptionConfigResolverService(null, new HttpFetchService(cacheStore));
     List<ProxyNode> nodes = List.of(
         node("HK-01", "hk", "Main", 0, "alpha"),
         node("JP-01", "jp", "Backup", 1, "beta"),
@@ -104,7 +108,8 @@ class SubscriptionConfigResolverServiceTest {
         custom_proxy_group=福利节点`select`'(?=.*(福利|0.5x))'
         """);
 
-    SubscriptionConfigResolverService resolver = new SubscriptionConfigResolverService(null);
+    DownloadCacheStore cacheStore = new DownloadCacheStore(new ObjectMapper(), dir.resolve("download-cache.json"));
+    SubscriptionConfigResolverService resolver = new SubscriptionConfigResolverService(null, new HttpFetchService(cacheStore));
     List<ProxyNode> nodes = List.of(
         node("机场A | 福利 0.5x", "a", "Main", 0, null),
         node("机场B | 正常 1x", "b", "Main", 0, null)
@@ -125,7 +130,8 @@ class SubscriptionConfigResolverServiceTest {
         custom_proxy_group=福利节点`select`[]'(?=.*(0.5|0.5倍|0.5x|福利))'
         """);
 
-    SubscriptionConfigResolverService resolver = new SubscriptionConfigResolverService(null);
+    DownloadCacheStore cacheStore = new DownloadCacheStore(new ObjectMapper(), dir.resolve("download-cache.json"));
+    SubscriptionConfigResolverService resolver = new SubscriptionConfigResolverService(null, new HttpFetchService(cacheStore));
     List<ProxyNode> nodes = List.of(
         node("机场A | 福利 0.5x", "a", "Main", 0, null),
         node("机场B | 正常 1x", "b", "Main", 0, null)
@@ -152,7 +158,8 @@ class SubscriptionConfigResolverServiceTest {
         ruleset=国外媒体,classical:rules.list
         """);
 
-    SubscriptionConfigResolverService resolver = new SubscriptionConfigResolverService(null);
+    DownloadCacheStore cacheStore = new DownloadCacheStore(new ObjectMapper(), dir.resolve("download-cache.json"));
+    SubscriptionConfigResolverService resolver = new SubscriptionConfigResolverService(null, new HttpFetchService(cacheStore));
     ResolvedSubscriptionConfig config = resolver.resolve(main.toString(), List.of());
 
     assertEquals(
@@ -187,7 +194,8 @@ class SubscriptionConfigResolverServiceTest {
       }
     };
 
-    SubscriptionConfigResolverService resolver = new SubscriptionConfigResolverService(settingsService);
+    DownloadCacheStore cacheStore = new DownloadCacheStore(new ObjectMapper(), dir.resolve("download-cache.json"));
+    SubscriptionConfigResolverService resolver = new SubscriptionConfigResolverService(settingsService, new HttpFetchService(cacheStore));
     List<ProxyNode> nodes = List.of(
         node("机场A | 香港 1", "a", "Main", 0, null),
         node("机场B | 香港 2", "b", "Main", 0, null)
@@ -213,7 +221,8 @@ class SubscriptionConfigResolverServiceTest {
         custom_proxy_group=新加坡节点`select`新加坡
         """);
 
-    SubscriptionConfigResolverService resolver = new SubscriptionConfigResolverService(null);
+    DownloadCacheStore cacheStore = new DownloadCacheStore(new ObjectMapper(), dir.resolve("download-cache.json"));
+    SubscriptionConfigResolverService resolver = new SubscriptionConfigResolverService(null, new HttpFetchService(cacheStore));
     List<ProxyNode> nodes = List.of(
         node("流量光 | Hong Kong 03", "hk", "Main", 0, null),
         node("流量光 | Taiwan 01", "tw", "Main", 0, null),

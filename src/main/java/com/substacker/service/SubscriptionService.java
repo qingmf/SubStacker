@@ -15,14 +15,14 @@ import org.yaml.snakeyaml.Yaml;
 
 import java.net.URISyntaxException;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 
 @ApplicationScoped
 public class SubscriptionService {
@@ -30,7 +30,7 @@ public class SubscriptionService {
 
   private final UpstreamService upstreamService;
   private final SubscriptionConfigResolverService subscriptionConfigResolverService;
-  private final HttpClient httpClient;
+  private final HttpFetchService httpFetchService;
   private final List<UpstreamParser> parsers;
   private final ProxyAggregator aggregator;
   private final Yaml yaml;
@@ -38,14 +38,12 @@ public class SubscriptionService {
   public SubscriptionService(
       UpstreamService upstreamService,
       SubscriptionConfigResolverService subscriptionConfigResolverService,
-      ObjectMapper objectMapper
+      ObjectMapper objectMapper,
+      HttpFetchService httpFetchService
   ) {
     this.upstreamService = upstreamService;
     this.subscriptionConfigResolverService = subscriptionConfigResolverService;
-    this.httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .followRedirects(HttpClient.Redirect.NORMAL)
-        .build();
+    this.httpFetchService = httpFetchService;
     this.parsers = List.of(
         new ClashYamlParser(),
         new UriListParser(objectMapper)
@@ -67,16 +65,23 @@ public class SubscriptionService {
   public List<ProxyNode> collectAll() {
     List<ProxyNode> out = new ArrayList<>();
     List<Upstream> upstreams = upstreamService.list();
-    for (int i = 0; i < upstreams.size(); i++) {
-      Upstream u = upstreams.get(i);
-      if (u == null || !u.enabled()) {
-        continue;
+    try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      record Task(Upstream upstream, Future<List<ProxyNode>> future) {}
+      List<Task> tasks = new ArrayList<>();
+      for (int i = 0; i < upstreams.size(); i++) {
+        Upstream u = upstreams.get(i);
+        if (u == null || !u.enabled()) {
+          continue;
+        }
+        final int idx = i;
+        tasks.add(new Task(u, executor.submit(() -> fetchAndParse(u, idx))));
       }
-      try {
-        out.addAll(fetchAndParse(u, i));
-      } catch (Exception ignored) {
-        // Upstream failures should not break the whole subscription generation.
-        LOG.warnf("Upstream failed: name=%s url=%s", safeName(u), safeUrl(u));
+      for (Task t : tasks) {
+        try {
+          out.addAll(t.future().get());
+        } catch (Exception e) {
+          LOG.warnf("Upstream failed: name=%s url=%s", safeName(t.upstream()), safeUrl(t.upstream()));
+        }
       }
     }
     return out;
@@ -85,20 +90,30 @@ public class SubscriptionService {
   public CollectReport collectReport() {
     List<UpstreamReport> reports = new ArrayList<>();
     List<Upstream> upstreams = upstreamService.list();
-    for (int i = 0; i < upstreams.size(); i++) {
-      Upstream u = upstreams.get(i);
-      if (u == null) {
-        continue;
+    try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      record Task(Upstream upstream, Future<List<ProxyNode>> future) {}
+      List<Task> tasks = new ArrayList<>();
+      for (int i = 0; i < upstreams.size(); i++) {
+        Upstream u = upstreams.get(i);
+        if (u == null) {
+          continue;
+        }
+        if (!u.enabled()) {
+          reports.add(UpstreamReport.disabled(safeName(u), safeUrl(u)));
+          continue;
+        }
+        final int idx = i;
+        tasks.add(new Task(u, executor.submit(() -> fetchAndParse(u, idx))));
       }
-      if (!u.enabled()) {
-        reports.add(UpstreamReport.disabled(safeName(u), safeUrl(u)));
-        continue;
-      }
-      try {
-        List<ProxyNode> nodes = fetchAndParse(u, i);
-        reports.add(UpstreamReport.ok(safeName(u), safeUrl(u), nodes.size()));
-      } catch (Exception e) {
-        reports.add(UpstreamReport.failed(safeName(u), safeUrl(u), e.getClass().getSimpleName() + ": " + e.getMessage()));
+      for (Task t : tasks) {
+        Upstream u = t.upstream();
+        try {
+          List<ProxyNode> nodes = t.future().get();
+          reports.add(UpstreamReport.ok(safeName(u), safeUrl(u), nodes.size()));
+        } catch (Exception e) {
+          Throwable cause = e instanceof ExecutionException ? e.getCause() : e;
+          reports.add(UpstreamReport.failed(safeName(u), safeUrl(u), cause.getClass().getSimpleName() + ": " + cause.getMessage()));
+        }
       }
     }
     return new CollectReport(reports);
@@ -128,7 +143,7 @@ public class SubscriptionService {
   }
 
   private List<ProxyNode> fetchAndParse(Upstream upstream, int sourceGroupId) throws Exception {
-    Fetched fetched = fetch(upstream);
+    HttpFetchService.Fetched fetched = httpFetchService.fetch(upstream.url(), upstream.headers());
     String sourceGroupName = safeName(upstream);
     List<ProxyNode> direct = applySourceMetadata(
         parseBody(upstream.name(), fetched.contentType(), fetched.body()),
@@ -149,15 +164,7 @@ public class SubscriptionService {
     List<ProxyNode> out = new ArrayList<>();
     for (ProviderRef providerRef : providers) {
       try {
-        Upstream provider = new Upstream(
-            upstream.id(),
-            upstream.name() + " | " + providerRef.name(),
-            upstream.type(),
-            providerRef.url(),
-            true,
-            upstream.headers()
-        );
-        Fetched providerFetched = fetch(provider);
+        HttpFetchService.Fetched providerFetched = httpFetchService.fetch(providerRef.url(), upstream.headers());
         out.addAll(applySourceMetadata(
             parseBody(upstream.name(), providerFetched.contentType(), providerFetched.body()),
             sourceGroupName,
@@ -228,56 +235,6 @@ public class SubscriptionService {
       out.add(node.withSource(sourceGroupName, sourceGroupId, sourceProviderName));
     }
     return out;
-  }
-
-  private Fetched fetch(Upstream u) throws Exception {
-    if (u.type() == UpstreamType.CLASH_YAML_URL || u.type() == UpstreamType.URI_LIST_URL) {
-      boolean hasUserAgent = hasHeader(u.headers(), "User-Agent");
-      boolean hasAccept = hasHeader(u.headers(), "Accept");
-      HttpRequest.Builder b = HttpRequest.newBuilder()
-          .uri(URI.create(u.url()))
-          .timeout(Duration.ofSeconds(20))
-          .GET();
-      if (!hasUserAgent) {
-        b.header("User-Agent", "Clash.Meta");
-      }
-      if (!hasAccept) {
-        b.header("Accept", "*/*");
-      }
-      if (u.headers() != null) {
-        for (Map.Entry<String, String> e : u.headers().entrySet()) {
-          if (e.getKey() == null || e.getKey().isBlank()) {
-            continue;
-          }
-          b.header(e.getKey(), e.getValue() == null ? "" : e.getValue());
-        }
-      }
-      HttpResponse<String> resp = httpClient.send(b.build(), HttpResponse.BodyHandlers.ofString());
-      if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
-        throw new IllegalStateException("HTTP " + resp.statusCode());
-      }
-      String ct = resp.headers().firstValue("content-type").orElse(null);
-      return new Fetched(ct, resp.body() == null ? "" : resp.body());
-    }
-    throw new IllegalArgumentException("Unsupported upstream type: " + u.type());
-  }
-
-  private static boolean hasHeader(Map<String, String> headers, String name) {
-    if (headers == null || headers.isEmpty()) {
-      return false;
-    }
-    for (String key : headers.keySet()) {
-      if (key != null && key.equalsIgnoreCase(name)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  private record Fetched(String contentType, String body) {
-    public String contentType() {
-      return contentType == null ? null : contentType.toLowerCase(Locale.ROOT);
-    }
   }
 
   private record ProviderRef(String name, String url) {

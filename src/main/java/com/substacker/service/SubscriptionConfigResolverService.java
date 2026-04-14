@@ -8,13 +8,9 @@ import org.jboss.logging.Logger;
 import org.yaml.snakeyaml.Yaml;
 
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -24,6 +20,11 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -105,15 +106,12 @@ public class SubscriptionConfigResolverService {
   );
 
   private final SubscriptionSettingsService subscriptionSettingsService;
-  private final HttpClient httpClient;
+  private final HttpFetchService httpFetchService;
   private final Yaml yaml;
 
-  public SubscriptionConfigResolverService(SubscriptionSettingsService subscriptionSettingsService) {
+  public SubscriptionConfigResolverService(SubscriptionSettingsService subscriptionSettingsService, HttpFetchService httpFetchService) {
     this.subscriptionSettingsService = subscriptionSettingsService;
-    this.httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .followRedirects(HttpClient.Redirect.NORMAL)
-        .build();
+    this.httpFetchService = httpFetchService;
     this.yaml = new Yaml();
   }
 
@@ -132,11 +130,12 @@ public class SubscriptionConfigResolverService {
       return SubscriptionConfigProfile.resolveStrict(effective).resolve(proxyNames);
     }
 
-    SourceRef mainSource = loadMainSource(effective);
+    ConcurrentHashMap<String, SourceRef> sourceCache = new ConcurrentHashMap<>();
+    SourceRef mainSource = loadMainSource(effective, sourceCache);
     ParseState state = new ParseState();
-    collectEntries(mainSource, state, new LinkedHashSet<>(), null);
+    collectEntries(mainSource, state, new LinkedHashSet<>(), null, sourceCache);
 
-    Map<String, Object> baseRoot = loadBaseRoot(state.clashRuleBase, state.clashRuleBaseOwner, state.localValues);
+    Map<String, Object> baseRoot = loadBaseRoot(state.clashRuleBase, state.clashRuleBaseOwner, state.localValues, sourceCache);
     List<Map<String, Object>> originalGroups = extractGroupList(baseRoot);
     List<String> originalRules = extractRuleList(baseRoot);
 
@@ -148,7 +147,7 @@ public class SubscriptionConfigResolverService {
     }
     groups = maybeConvertRegionalGroupsToUrlTest(groups);
 
-    List<String> generatedRules = state.enableRuleGenerator ? buildRules(state.rulesets) : List.of();
+    List<String> generatedRules = state.enableRuleGenerator ? buildRules(state.rulesets, sourceCache) : List.of();
     List<String> rules;
     if (generatedRules.isEmpty()) {
       rules = !originalRules.isEmpty() ? originalRules : SubscriptionConfigProfile.DEFAULT.buildRules();
@@ -217,15 +216,15 @@ public class SubscriptionConfigResolverService {
     return false;
   }
 
-  private SourceRef loadMainSource(String effectiveConfig) {
+  private SourceRef loadMainSource(String effectiveConfig, Map<String, SourceRef> cache) {
     if (looksLikeHttpUrl(effectiveConfig)) {
-      return loadSource(effectiveConfig, null);
+      return loadSource(effectiveConfig, null, cache);
     }
     String templateUrl = subscriptionSettingsService == null ? null : subscriptionSettingsService.findTemplateUrl(effectiveConfig);
     if (templateUrl != null) {
-      return loadSource(templateUrl, null);
+      return loadSource(templateUrl, null, cache);
     }
-    return loadSource(effectiveConfig, null);
+    return loadSource(effectiveConfig, null, cache);
   }
 
   private List<Map<String, Object>> buildGroups(List<GroupSpec> specs, List<ProxyNode> availableNodes) {
@@ -508,24 +507,32 @@ public class SubscriptionConfigResolverService {
         || value.contains("\\s");
   }
 
-  private List<String> buildRules(List<RuleSetRef> rulesets) {
-    List<String> rules = new ArrayList<>();
-    for (RuleSetRef ruleset : rulesets) {
-      try {
-        rules.addAll(expandRuleSet(ruleset));
-      } catch (Exception e) {
-        LOG.warnf(
-            "Ignore failed remote ruleset: policy=%s source=%s reason=%s",
-            ruleset.policy(),
-            ruleset.source(),
-            e.getMessage()
-        );
+  private List<String> buildRules(List<RuleSetRef> rulesets, Map<String, SourceRef> cache) {
+    try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      record Task(RuleSetRef ruleset, Future<List<String>> future) {}
+      List<Task> tasks = new ArrayList<>();
+      for (RuleSetRef ruleset : rulesets) {
+        tasks.add(new Task(ruleset, executor.submit(() -> expandRuleSet(ruleset, cache))));
       }
+      List<String> rules = new ArrayList<>();
+      for (Task t : tasks) {
+        try {
+          rules.addAll(t.future().get());
+        } catch (Exception e) {
+          Throwable cause = e instanceof ExecutionException ? e.getCause() : e;
+          LOG.warnf(
+              "Ignore failed remote ruleset: policy=%s source=%s reason=%s",
+              t.ruleset().policy(),
+              t.ruleset().source(),
+              rootCauseMessage(cause)
+          );
+        }
+      }
+      return dedupeStrings(rules);
     }
-    return dedupeStrings(rules);
   }
 
-  private List<String> expandRuleSet(RuleSetRef ruleset) {
+  private List<String> expandRuleSet(RuleSetRef ruleset, Map<String, SourceRef> cache) {
     String source = ruleset.source();
     if (source.startsWith("[]")) {
       return List.of(buildInlineRule(source.substring(2), ruleset.policy()));
@@ -542,7 +549,7 @@ public class SubscriptionConfigResolverService {
       }
     }
 
-    SourceRef ruleSource = loadSource(remoteSource, ruleset.owner());
+    SourceRef ruleSource = loadSource(remoteSource, ruleset.owner(), cache);
     return parseRuleListBody(ruleSource.body(), mode, ruleset.policy());
   }
 
@@ -694,14 +701,14 @@ public class SubscriptionConfigResolverService {
     return suffixOptions;
   }
 
-  private void collectEntries(SourceRef source, ParseState state, Set<String> visited, ImportKind forcedKind) {
+  private void collectEntries(SourceRef source, ParseState state, Set<String> visited, ImportKind forcedKind, Map<String, SourceRef> cache) {
     if (!visited.add(source.identity())) {
       LOG.warnf("Ignore recursive import: %s", source.identity());
       return;
     }
     try {
       preScanTemplateLocals(source.body(), state.localValues);
-      List<String> renderedLines = renderTemplateLines(source, state.localValues, new LinkedHashSet<>());
+      List<String> renderedLines = renderTemplateLines(source, state.localValues, new LinkedHashSet<>(), cache);
       boolean hasSection = renderedLines.stream()
           .map(SubscriptionConfigResolverService::sanitizeLine)
           .anyMatch(line -> line.startsWith("[") && line.endsWith("]"));
@@ -723,7 +730,7 @@ public class SubscriptionConfigResolverService {
         if (!"custom".equals(currentSection)) {
           continue;
         }
-        processCustomLine(source, line, state, visited, forcedKind);
+        processCustomLine(source, line, state, visited, forcedKind, cache);
       }
     } finally {
       visited.remove(source.identity());
@@ -761,7 +768,8 @@ public class SubscriptionConfigResolverService {
       String line,
       ParseState state,
       Set<String> visited,
-      ImportKind forcedKind
+      ImportKind forcedKind,
+      Map<String, SourceRef> cache
   ) {
     String key = null;
     String value = line;
@@ -792,7 +800,7 @@ public class SubscriptionConfigResolverService {
 
     if ("ruleset".equals(key)) {
       if (value.startsWith("!!import:")) {
-        collectEntries(loadSource(value.substring("!!import:".length()), source), state, visited, ImportKind.RULESET);
+        collectEntries(loadSource(value.substring("!!import:".length()), source, cache), state, visited, ImportKind.RULESET, cache);
         return;
       }
       RuleSetRef ref = parseRuleSet(value, source);
@@ -804,7 +812,7 @@ public class SubscriptionConfigResolverService {
 
     if ("custom_proxy_group".equals(key) || "proxy_group".equals(key)) {
       if (value.startsWith("!!import:")) {
-        collectEntries(loadSource(value.substring("!!import:".length()), source), state, visited, ImportKind.GROUP);
+        collectEntries(loadSource(value.substring("!!import:".length()), source, cache), state, visited, ImportKind.GROUP, cache);
         return;
       }
       GroupSpec spec = parseGroup(value);
@@ -916,7 +924,7 @@ public class SubscriptionConfigResolverService {
     return new GroupSpec(name, normalizedType, selectors, testUrl, interval, timeout, tolerance, strategy);
   }
 
-  private List<String> renderTemplateLines(SourceRef source, Map<String, String> localValues, Set<String> includeStack) {
+  private List<String> renderTemplateLines(SourceRef source, Map<String, String> localValues, Set<String> includeStack, Map<String, SourceRef> cache) {
     if (!includeStack.add(source.identity())) {
       LOG.warnf("Ignore recursive template include: %s", source.identity());
       return List.of();
@@ -933,7 +941,7 @@ public class SubscriptionConfigResolverService {
             if (isFrameActive(frames)) {
               String includeRef = extractQuotedValue(directive.substring("include".length()).trim());
               if (includeRef != null && !includeRef.isBlank()) {
-                out.addAll(renderTemplateLines(loadSource(includeRef, source), localValues, includeStack));
+                out.addAll(renderTemplateLines(loadSource(includeRef, source, cache), localValues, includeStack, cache));
               }
             }
             continue;
@@ -1114,19 +1122,19 @@ public class SubscriptionConfigResolverService {
     return value;
   }
 
-  private SourceRef loadSource(String reference, SourceRef parent) {
+  private SourceRef loadSource(String reference, SourceRef parent, Map<String, SourceRef> cache) {
     String trimmed = reference == null ? "" : reference.trim();
     if (trimmed.isBlank()) {
       throw new IllegalArgumentException("Empty source reference");
     }
 
     if (looksLikeHttpUrl(trimmed)) {
-      return loadRemoteSource(trimmed);
+      return loadRemoteSource(trimmed, cache);
     }
     if (parent != null && parent.url() != null) {
       URI resolved = parent.url().resolve(trimmed);
       if (looksLikeHttpUrl(resolved.toString())) {
-        return loadRemoteSource(resolved.toString());
+        return loadRemoteSource(resolved.toString(), cache);
       }
     }
 
@@ -1145,36 +1153,29 @@ public class SubscriptionConfigResolverService {
     }
   }
 
-  private SourceRef loadRemoteSource(String url) {
-    return new SourceRef(url, fetchText(url), URI.create(url), null);
-  }
+  private static final SourceRef FAILED_REMOTE = new SourceRef("__failed__", "", URI.create("http://localhost"), null);
 
-  private String fetchText(String url) {
-    try {
-      HttpRequest request = HttpRequest.newBuilder()
-          .uri(URI.create(url))
-          .timeout(Duration.ofSeconds(20))
-          .header("User-Agent", "Clash.Meta")
-          .header("Accept", "*/*")
-          .GET()
-          .build();
-      HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-      if (response.statusCode() < 200 || response.statusCode() >= 300) {
-        throw new IllegalStateException("HTTP " + response.statusCode() + " when fetching " + url);
+  private SourceRef loadRemoteSource(String url, Map<String, SourceRef> cache) {
+    SourceRef result = cache.computeIfAbsent(url, u -> {
+      try {
+        return new SourceRef(u, httpFetchService.fetchText(u), URI.create(u), null);
+      } catch (Exception e) {
+        return FAILED_REMOTE;
       }
-      return response.body() == null ? "" : response.body();
-    } catch (Exception e) {
-      throw new IllegalStateException("Failed to fetch remote config: " + url, e);
+    });
+    if (result == FAILED_REMOTE) {
+      throw new IllegalStateException("Failed to fetch remote config: " + url);
     }
+    return result;
   }
 
-  private Map<String, Object> loadBaseRoot(String baseRef, SourceRef owner, Map<String, String> localValues) {
+  private Map<String, Object> loadBaseRoot(String baseRef, SourceRef owner, Map<String, String> localValues, Map<String, SourceRef> cache) {
     if (baseRef == null || baseRef.isBlank()) {
       return Map.of();
     }
     try {
-      SourceRef source = loadSource(baseRef, owner);
-      String rendered = String.join("\n", renderTemplateLines(source, localValues, new LinkedHashSet<>()));
+      SourceRef source = loadSource(baseRef, owner, cache);
+      String rendered = String.join("\n", renderTemplateLines(source, localValues, new LinkedHashSet<>(), cache));
       Object root = tryLoadYaml(rendered);
       if (!(root instanceof Map<?, ?> map)) {
         return Map.of();
@@ -1644,5 +1645,14 @@ public class SubscriptionConfigResolverService {
     private boolean overwriteOriginalRules = true;
     private String clashRuleBase;
     private SourceRef clashRuleBaseOwner;
+  }
+
+  private static String rootCauseMessage(Throwable t) {
+    if (t == null) return "unknown";
+    Throwable cause = t;
+    while (cause.getCause() != null && cause.getCause() != cause) {
+      cause = cause.getCause();
+    }
+    return cause.getClass().getSimpleName() + ": " + cause.getMessage();
   }
 }
