@@ -1,10 +1,12 @@
 package com.substacker.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.ArrayList;
 import java.util.List;
 
+@RegisterForReflection
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record AppState(
     int version,

@@ -2,10 +2,12 @@ package com.substacker.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.substacker.proxy.SubscriptionConfigProfile;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.ArrayList;
 import java.util.List;
 
+@RegisterForReflection
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record SubscriptionSettings(
     String defaultConfigId,

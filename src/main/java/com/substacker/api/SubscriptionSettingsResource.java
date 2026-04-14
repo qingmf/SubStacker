@@ -15,6 +15,7 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 
+import io.quarkus.runtime.annotations.RegisterForReflection;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -96,18 +97,22 @@ public class SubscriptionSettingsResource {
     );
   }
 
+  @RegisterForReflection
   @JsonInclude(JsonInclude.Include.NON_NULL)
   public record UpdateSubscriptionSettingsRequest(String defaultConfigId, Boolean regionalGroupsUrlTestEnabled) {
   }
 
+  @RegisterForReflection
   @JsonInclude(JsonInclude.Include.NON_NULL)
   public record TemplateRequest(String name, String url) {
   }
 
+  @RegisterForReflection
   @JsonInclude(JsonInclude.Include.NON_NULL)
   public record ConfigOption(String id, String label, String description, String url, boolean custom) {
   }
 
+  @RegisterForReflection
   @JsonInclude(JsonInclude.Include.NON_NULL)
   public record SubscriptionSettingsResponse(
       String defaultConfigId,

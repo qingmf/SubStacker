@@ -1,6 +1,7 @@
 package com.substacker.api;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
@@ -17,6 +18,7 @@ public class ErrorMapper implements ExceptionMapper<Exception> {
         .build();
   }
 
+  @RegisterForReflection
   @JsonInclude(JsonInclude.Include.NON_NULL)
   public record ErrorResponse(String message) {
   }

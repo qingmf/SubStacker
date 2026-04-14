@@ -1,7 +1,9 @@
 package com.substacker.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 
+@RegisterForReflection
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record SubscriptionTemplate(
     String id,
