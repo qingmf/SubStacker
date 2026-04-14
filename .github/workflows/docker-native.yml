@@ -50,7 +50,7 @@ jobs:
 
       - name: Build Quarkus native executable
         run: |
-          mvn package -Dnative -DskipTests -Dquarkus.native.container-build=true
+          mvn package -Pnative -DskipTests -Dquarkus.native.container-build=true
 
       - name: Copy native runner to docker directory
         run: |
