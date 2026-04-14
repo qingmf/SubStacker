@@ -1,7 +1,7 @@
 FROM quay.io/quarkus/quarkus-micro-image:2.0
 WORKDIR /work/
 ENV SUBSTACKER_DATA_DIR=/work/data
-COPY *-runner /work/application
+COPY application /work/application
 RUN chmod 775 /work/application
 EXPOSE 8080
 USER 1001

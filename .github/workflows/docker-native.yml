@@ -54,7 +54,13 @@ jobs:
 
       - name: Copy native runner to docker directory
         run: |
-          cp target/*-runner src/main/docker/
+          ls -la target/ || true
+          RUNNER_FILE=$(find target -maxdepth 1 -type f \( -name '*-runner' -o -name 'substacker-*' ! -name '*.jar' ! -name '*.zip' \) | head -n 1)
+          if [ -z "$RUNNER_FILE" ]; then
+            echo "ERROR: Native runner not found in target/"
+            exit 1
+          fi
+          cp "$RUNNER_FILE" src/main/docker/application
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
