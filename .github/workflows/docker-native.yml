@@ -52,10 +52,14 @@ jobs:
         run: |
           mvn package -Dnative -DskipTests -Dquarkus.native.container-build=true
 
+      - name: Copy native runner to docker directory
+        run: |
+          cp target/*-runner src/main/docker/
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ./src/main/docker
           file: ./src/main/docker/Dockerfile.native
           platforms: linux/amd64
           push: true
