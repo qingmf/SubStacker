@@ -5,13 +5,30 @@ on:
     branches: [main]
   workflow_dispatch:
 
+env:
+  IMAGE_NAME: substacker
+
 jobs:
-  build-native:
+  docker:
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -22,11 +39,27 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+
+      - name: Build Quarkus native executable
         run: |
-          docker buildx build \
-            --platform linux/amd64 \
-            --push \
-            -t docker.io/${{ secrets.DOCKERHUB_USERNAME }}/substacker:latest \
-            -t docker.io/${{ secrets.DOCKERHUB_USERNAME }}/substacker:${{ github.sha }} \
-            .
+          mvn package -Dnative -DskipTests -Dquarkus.native.container-build=true
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./src/main/docker/Dockerfile.native
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
