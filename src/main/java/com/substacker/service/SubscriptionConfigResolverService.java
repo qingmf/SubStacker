@@ -3,6 +3,7 @@ package com.substacker.service;
 import com.substacker.proxy.ProxyNode;
 import com.substacker.proxy.ResolvedSubscriptionConfig;
 import com.substacker.proxy.SubscriptionConfigProfile;
+import com.substacker.util.StringUtils;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 import org.yaml.snakeyaml.Yaml;
@@ -25,6 +26,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -108,11 +110,13 @@ public class SubscriptionConfigResolverService {
   private final SubscriptionSettingsService subscriptionSettingsService;
   private final HttpFetchService httpFetchService;
   private final Yaml yaml;
+  private final Semaphore rulesetFetchPermits;
 
   public SubscriptionConfigResolverService(SubscriptionSettingsService subscriptionSettingsService, HttpFetchService httpFetchService) {
     this.subscriptionSettingsService = subscriptionSettingsService;
     this.httpFetchService = httpFetchService;
     this.yaml = new Yaml();
+    this.rulesetFetchPermits = new Semaphore(8);
   }
 
   public ResolvedSubscriptionConfig resolve(String requestedConfigId, List<ProxyNode> nodes) {
@@ -161,7 +165,7 @@ public class SubscriptionConfigResolverService {
   }
 
   private List<Map<String, Object>> maybeConvertRegionalGroupsToUrlTest(List<Map<String, Object>> groups) {
-    if (subscriptionSettingsService == null || !subscriptionSettingsService.current().regionalGroupsUrlTestEnabled()) {
+    if (!subscriptionSettingsService.current().regionalGroupsUrlTestEnabled()) {
       return groups;
     }
 
@@ -217,10 +221,10 @@ public class SubscriptionConfigResolverService {
   }
 
   private SourceRef loadMainSource(String effectiveConfig, Map<String, SourceRef> cache) {
-    if (looksLikeHttpUrl(effectiveConfig)) {
+    if (StringUtils.looksLikeHttpUrl(effectiveConfig)) {
       return loadSource(effectiveConfig, null, cache);
     }
-    String templateUrl = subscriptionSettingsService == null ? null : subscriptionSettingsService.findTemplateUrl(effectiveConfig);
+    String templateUrl = subscriptionSettingsService.findTemplateUrl(effectiveConfig);
     if (templateUrl != null) {
       return loadSource(templateUrl, null, cache);
     }
@@ -432,8 +436,8 @@ public class SubscriptionConfigResolverService {
   }
 
   private List<ProxyNode> filterByGroupId(List<ProxyNode> nodes, String value) {
-    Set<Integer> accepted = parseIntSet(value);
-    boolean negate = isNegated(value);
+    Set<Integer> accepted = StringUtils.parseIntSet(value);
+    boolean negate = StringUtils.isNegated(value);
     return nodes.stream()
         .filter(node -> {
           Integer groupId = node.sourceGroupId();
@@ -444,8 +448,8 @@ public class SubscriptionConfigResolverService {
   }
 
   private List<ProxyNode> filterBySourceName(List<ProxyNode> nodes, String value, boolean useGroupName) {
-    Set<String> accepted = parseStringSet(value);
-    boolean negate = isNegated(value);
+    Set<String> accepted = StringUtils.parseStringSet(value);
+    boolean negate = StringUtils.isNegated(value);
     return nodes.stream()
         .filter(node -> {
           String actual = useGroupName ? node.sourceGroupName() : node.sourceProviderName();
@@ -488,23 +492,10 @@ public class SubscriptionConfigResolverService {
 
   private static String normalizeSelectorPattern(String patternText) {
     String normalized = patternText == null ? "" : patternText.trim();
-    if (isQuoted(normalized)) {
-      normalized = unquote(normalized).trim();
+    if (StringUtils.isQuoted(normalized)) {
+      normalized = StringUtils.unquote(normalized).trim();
     }
     return normalized;
-  }
-
-  private static boolean looksLikeRegexSelector(String value) {
-    if (value == null || value.isBlank()) {
-      return false;
-    }
-    return value.startsWith("(?")
-        || value.contains(".*")
-        || value.contains(".+")
-        || value.contains("|")
-        || value.contains("\\d")
-        || value.contains("\\w")
-        || value.contains("\\s");
   }
 
   private List<String> buildRules(List<RuleSetRef> rulesets, Map<String, SourceRef> cache) {
@@ -524,11 +515,11 @@ public class SubscriptionConfigResolverService {
               "Ignore failed remote ruleset: policy=%s source=%s reason=%s",
               t.ruleset().policy(),
               t.ruleset().source(),
-              rootCauseMessage(cause)
+              StringUtils.rootCauseMessage(cause)
           );
         }
       }
-      return dedupeStrings(rules);
+      return StringUtils.dedupeStrings(rules);
     }
   }
 
@@ -549,8 +540,19 @@ public class SubscriptionConfigResolverService {
       }
     }
 
-    SourceRef ruleSource = loadSource(remoteSource, ruleset.owner(), cache);
-    return parseRuleListBody(ruleSource.body(), mode, ruleset.policy());
+    // Limit concurrent remote rule set fetches
+    try {
+      rulesetFetchPermits.acquire();
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return List.of();
+    }
+    try {
+      SourceRef ruleSource = loadSource(remoteSource, ruleset.owner(), cache);
+      return parseRuleListBody(ruleSource.body(), mode, ruleset.policy());
+    } finally {
+      rulesetFetchPermits.release();
+    }
   }
 
   private List<String> parseRuleListBody(String body, String mode, String policy) {
@@ -577,7 +579,7 @@ public class SubscriptionConfigResolverService {
 
     List<String> rules = new ArrayList<>();
     for (String rawLine : body.split("\\R")) {
-      String line = sanitizeLine(rawLine);
+      String line = StringUtils.sanitizeLine(rawLine);
       if (line.isBlank() || line.equalsIgnoreCase("payload:")) {
         continue;
       }
@@ -628,7 +630,7 @@ public class SubscriptionConfigResolverService {
   }
 
   private String buildInlineRule(String inlineSource, String policy) {
-    List<String> parts = splitComma(inlineSource);
+    List<String> parts = StringUtils.splitComma(inlineSource);
     if (parts.isEmpty()) {
       throw new IllegalArgumentException("Invalid inline ruleset: " + inlineSource);
     }
@@ -653,7 +655,7 @@ public class SubscriptionConfigResolverService {
   }
 
   private String attachPolicy(String rawRule, String policy) {
-    List<String> parts = splitComma(rawRule);
+    List<String> parts = StringUtils.splitComma(rawRule);
     if (parts.isEmpty()) {
       throw new IllegalArgumentException("Invalid rule line: " + rawRule);
     }
@@ -710,12 +712,12 @@ public class SubscriptionConfigResolverService {
       preScanTemplateLocals(source.body(), state.localValues);
       List<String> renderedLines = renderTemplateLines(source, state.localValues, new LinkedHashSet<>(), cache);
       boolean hasSection = renderedLines.stream()
-          .map(SubscriptionConfigResolverService::sanitizeLine)
+          .map(StringUtils::sanitizeLine)
           .anyMatch(line -> line.startsWith("[") && line.endsWith("]"));
       String currentSection = forcedKind != null && !hasSection ? "custom" : "";
 
       for (String rawLine : renderedLines) {
-        String line = sanitizeLine(rawLine);
+        String line = StringUtils.sanitizeLine(rawLine);
         if (line.isBlank()) {
           continue;
         }
@@ -740,7 +742,7 @@ public class SubscriptionConfigResolverService {
   private void preScanTemplateLocals(String body, Map<String, String> localValues) {
     String currentSection = "";
     for (String rawLine : body.split("\\R")) {
-      String line = sanitizeLine(rawLine);
+      String line = StringUtils.sanitizeLine(rawLine);
       if (line.isBlank()) {
         continue;
       }
@@ -824,11 +826,11 @@ public class SubscriptionConfigResolverService {
 
     state.localValues.put(key, value);
     if ("enable_rule_generator".equals(key)) {
-      state.enableRuleGenerator = truthy(value);
+      state.enableRuleGenerator = StringUtils.truthy(value);
       return;
     }
     if ("overwrite_original_rules".equals(key)) {
-      state.overwriteOriginalRules = truthy(value);
+      state.overwriteOriginalRules = StringUtils.truthy(value);
       return;
     }
     if ("clash_rule_base".equals(key) || "rule_base".equals(key)) {
@@ -866,7 +868,7 @@ public class SubscriptionConfigResolverService {
       int lastComma = sourcePart.lastIndexOf(',');
       if (lastComma > 0 && lastComma < sourcePart.length() - 1) {
         String maybeInterval = sourcePart.substring(lastComma + 1).trim();
-        if (looksLikeInteger(maybeInterval)) {
+        if (StringUtils.looksLikeInteger(maybeInterval)) {
           interval = Integer.parseInt(maybeInterval);
           sourcePart = sourcePart.substring(0, lastComma).trim();
         }
@@ -903,12 +905,12 @@ public class SubscriptionConfigResolverService {
     String normalizedType = type.toLowerCase(Locale.ROOT);
     if (TEST_GROUP_TYPES.contains(normalizedType) && tail.size() >= 2) {
       selectors = new ArrayList<>(tail.subList(0, tail.size() - 2));
-      testUrl = blankToNull(tail.get(tail.size() - 2));
+      testUrl = StringUtils.blankToNull(tail.get(tail.size() - 2));
 
-      List<String> timing = splitComma(tail.get(tail.size() - 1));
-      interval = !timing.isEmpty() ? parseInteger(timing.get(0), 300) : 300;
-      timeout = timing.size() > 1 ? parseInteger(timing.get(1), null) : null;
-      tolerance = timing.size() > 2 ? parseInteger(timing.get(2), null) : null;
+      List<String> timing = StringUtils.splitComma(tail.get(tail.size() - 1));
+      interval = !timing.isEmpty() ? StringUtils.parseInteger(timing.get(0), 300) : 300;
+      timeout = timing.size() > 1 ? StringUtils.parseInteger(timing.get(1), null) : null;
+      tolerance = timing.size() > 2 ? StringUtils.parseInteger(timing.get(2), null) : null;
 
       if ("load-balance".equals(normalizedType) && selectors.size() > 1) {
         String maybeStrategy = selectors.get(selectors.size() - 1).trim().toLowerCase(Locale.ROOT);
@@ -939,7 +941,7 @@ public class SubscriptionConfigResolverService {
           String directive = trimmed.substring(2, trimmed.length() - 2).trim();
           if (directive.startsWith("include ")) {
             if (isFrameActive(frames)) {
-              String includeRef = extractQuotedValue(directive.substring("include".length()).trim());
+              String includeRef = StringUtils.extractQuotedValue(directive.substring("include".length()).trim());
               if (includeRef != null && !includeRef.isBlank()) {
                 out.addAll(renderTemplateLines(loadSource(includeRef, source, cache), localValues, includeStack, cache));
               }
@@ -1041,13 +1043,13 @@ public class SubscriptionConfigResolverService {
 
     Comparison comparison = findComparison(expr);
     if (comparison != null) {
-      String left = stringifyValue(evaluateValue(comparison.left(), localValues));
-      String right = stringifyValue(evaluateValue(comparison.right(), localValues));
+      String left = StringUtils.stringifyValue(evaluateValue(comparison.left(), localValues));
+      String right = StringUtils.stringifyValue(evaluateValue(comparison.right(), localValues));
       boolean equals = Objects.equals(left, right);
       return comparison.negated() ? !equals : equals;
     }
 
-    return truthyObject(evaluateValue(expr, localValues));
+    return StringUtils.truthyObject(evaluateValue(expr, localValues));
   }
 
   private Object evaluateValue(String expression, Map<String, String> localValues) {
@@ -1055,8 +1057,8 @@ public class SubscriptionConfigResolverService {
     if (expr.isBlank()) {
       return null;
     }
-    if (isQuoted(expr)) {
-      return unquote(expr);
+    if (StringUtils.isQuoted(expr)) {
+      return StringUtils.unquote(expr);
     }
     if (expr.equalsIgnoreCase("true")) {
       return Boolean.TRUE;
@@ -1070,7 +1072,7 @@ public class SubscriptionConfigResolverService {
         return null;
       }
       Object first = resolveMaybePathValue(evaluateValue(args.get(0), localValues), localValues);
-      if (!isBlankValue(first)) {
+      if (!StringUtils.isBlankValue(first)) {
         return first;
       }
       return args.size() > 1 ? evaluateValue(args.get(1), localValues) : null;
@@ -1081,7 +1083,7 @@ public class SubscriptionConfigResolverService {
         return Boolean.FALSE;
       }
       Object value = resolveMaybePathValue(evaluateValue(args.get(0), localValues), localValues);
-      return !isBlankValue(value);
+      return !StringUtils.isBlankValue(value);
     }
     if (expr.toLowerCase(Locale.ROOT).startsWith("bool(") && expr.endsWith(")")) {
       List<String> args = splitArguments(expr.substring("bool(".length(), expr.length() - 1));
@@ -1089,7 +1091,7 @@ public class SubscriptionConfigResolverService {
         return Boolean.FALSE;
       }
       Object value = resolveMaybePathValue(evaluateValue(args.get(0), localValues), localValues);
-      return truthyObject(value);
+      return StringUtils.truthyObject(value);
     }
     if (expr.startsWith("local.")) {
       return localValues.get(expr.substring("local.".length()).toLowerCase(Locale.ROOT));
@@ -1105,7 +1107,7 @@ public class SubscriptionConfigResolverService {
     StringBuffer out = new StringBuffer();
     while (matcher.find()) {
       Object value = resolveMaybePathValue(evaluateValue(matcher.group(1), localValues), localValues);
-      matcher.appendReplacement(out, Matcher.quoteReplacement(stringifyValue(value)));
+      matcher.appendReplacement(out, Matcher.quoteReplacement(StringUtils.stringifyValue(value)));
     }
     matcher.appendTail(out);
     return out.toString();
@@ -1128,12 +1130,12 @@ public class SubscriptionConfigResolverService {
       throw new IllegalArgumentException("Empty source reference");
     }
 
-    if (looksLikeHttpUrl(trimmed)) {
+    if (StringUtils.looksLikeHttpUrl(trimmed)) {
       return loadRemoteSource(trimmed, cache);
     }
     if (parent != null && parent.url() != null) {
       URI resolved = parent.url().resolve(trimmed);
-      if (looksLikeHttpUrl(resolved.toString())) {
+      if (StringUtils.looksLikeHttpUrl(resolved.toString())) {
         return loadRemoteSource(resolved.toString(), cache);
       }
     }
@@ -1222,7 +1224,7 @@ public class SubscriptionConfigResolverService {
         out.add(line);
       }
     }
-    return dedupeStrings(out);
+    return StringUtils.dedupeStrings(out);
   }
 
   @SuppressWarnings("unchecked")
@@ -1258,67 +1260,6 @@ public class SubscriptionConfigResolverService {
     } catch (Exception ignored) {
       return null;
     }
-  }
-
-  private static boolean looksLikeHttpUrl(String value) {
-    if (value == null || value.isBlank()) {
-      return false;
-    }
-    try {
-      URI uri = URI.create(value.trim());
-      return Objects.equals(uri.getScheme(), "http") || Objects.equals(uri.getScheme(), "https");
-    } catch (Exception ignored) {
-      return false;
-    }
-  }
-
-  private static Integer parseInteger(String value, Integer fallback) {
-    if (value == null || value.isBlank()) {
-      return fallback;
-    }
-    try {
-      return Integer.parseInt(value.trim());
-    } catch (NumberFormatException ignored) {
-      return fallback;
-    }
-  }
-
-  private static boolean looksLikeInteger(String value) {
-    if (value == null || value.isBlank()) {
-      return false;
-    }
-    try {
-      Integer.parseInt(value.trim());
-      return true;
-    } catch (NumberFormatException ignored) {
-      return false;
-    }
-  }
-
-  private static String blankToNull(String value) {
-    if (value == null || value.isBlank()) {
-      return null;
-    }
-    return value.trim();
-  }
-
-  private static String sanitizeLine(String rawLine) {
-    if (rawLine == null) {
-      return "";
-    }
-    String line = rawLine.replace("\uFEFF", "").trim();
-    if (line.startsWith(";") || line.startsWith("#") || line.startsWith("//")) {
-      return "";
-    }
-    return line;
-  }
-
-  private static List<String> splitComma(String value) {
-    List<String> parts = new ArrayList<>();
-    for (String part : value.split(",")) {
-      parts.add(part.trim());
-    }
-    return parts;
   }
 
   private static List<String> splitArguments(String source) {
@@ -1478,62 +1419,6 @@ public class SubscriptionConfigResolverService {
     return null;
   }
 
-  private static boolean truthy(String value) {
-    if (value == null) {
-      return false;
-    }
-    return truthyObject(value.trim());
-  }
-
-  private static boolean truthyObject(Object value) {
-    if (value == null) {
-      return false;
-    }
-    if (value instanceof Boolean b) {
-      return b;
-    }
-    String normalized = String.valueOf(value).trim().toLowerCase(Locale.ROOT);
-    if (normalized.isBlank()) {
-      return false;
-    }
-    return !normalized.equals("false")
-        && !normalized.equals("0")
-        && !normalized.equals("off")
-        && !normalized.equals("no");
-  }
-
-  private static boolean isBlankValue(Object value) {
-    if (value == null) {
-      return true;
-    }
-    return value instanceof String s && s.isBlank();
-  }
-
-  private static String stringifyValue(Object value) {
-    return value == null ? "" : String.valueOf(value);
-  }
-
-  private static boolean isQuoted(String value) {
-    return value.length() >= 2
-        && ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'")));
-  }
-
-  private static String unquote(String value) {
-    return isQuoted(value) ? value.substring(1, value.length() - 1) : value;
-  }
-
-  private static String extractQuotedValue(String value) {
-    Matcher doubleQuoted = Pattern.compile("^\"(.*)\"$").matcher(value.trim());
-    if (doubleQuoted.find()) {
-      return doubleQuoted.group(1);
-    }
-    Matcher singleQuoted = Pattern.compile("^'(.*)'$").matcher(value.trim());
-    if (singleQuoted.find()) {
-      return singleQuoted.group(1);
-    }
-    return null;
-  }
-
   private static String canonicalRuleMode(String prefix) {
     String normalized = prefix.toLowerCase(Locale.ROOT);
     if (normalized.equals("classic") || normalized.equals("classical") || normalized.equals("clash-classical")) {
@@ -1557,55 +1442,11 @@ public class SubscriptionConfigResolverService {
     return new ArrayList<>(deduped.values());
   }
 
-  private static List<String> dedupeStrings(List<String> values) {
-    LinkedHashSet<String> out = new LinkedHashSet<>();
-    for (String value : values) {
-      if (value == null || value.isBlank()) {
-        continue;
-      }
-      out.add(value);
-    }
-    return new ArrayList<>(out);
-  }
-
   private static List<String> mergeRules(List<String> baseRules, List<String> generatedRules) {
     List<String> merged = new ArrayList<>();
     merged.addAll(baseRules);
     merged.addAll(generatedRules);
-    return dedupeStrings(merged);
-  }
-
-  private static boolean isNegated(String rawValue) {
-    return rawValue != null && rawValue.trim().startsWith("!");
-  }
-
-  private static Set<Integer> parseIntSet(String rawValue) {
-    Set<Integer> out = new LinkedHashSet<>();
-    String normalized = rawValue == null ? "" : rawValue.trim();
-    if (normalized.startsWith("!")) {
-      normalized = normalized.substring(1).trim();
-    }
-    for (String part : splitComma(normalized)) {
-      Integer value = parseInteger(part, null);
-      if (value != null) {
-        out.add(value);
-      }
-    }
-    return out;
-  }
-
-  private static Set<String> parseStringSet(String rawValue) {
-    Set<String> out = new LinkedHashSet<>();
-    String normalized = rawValue == null ? "" : rawValue.trim();
-    if (normalized.startsWith("!")) {
-      normalized = normalized.substring(1).trim();
-    }
-    for (String part : splitComma(normalized)) {
-      if (!part.isBlank()) {
-        out.add(part.trim().toLowerCase(Locale.ROOT));
-      }
-    }
-    return out;
+    return StringUtils.dedupeStrings(merged);
   }
 
   private enum ImportKind {
@@ -1647,12 +1488,4 @@ public class SubscriptionConfigResolverService {
     private SourceRef clashRuleBaseOwner;
   }
 
-  private static String rootCauseMessage(Throwable t) {
-    if (t == null) return "unknown";
-    Throwable cause = t;
-    while (cause.getCause() != null && cause.getCause() != cause) {
-      cause = cause.getCause();
-    }
-    return cause.getClass().getSimpleName() + ": " + cause.getMessage();
-  }
 }

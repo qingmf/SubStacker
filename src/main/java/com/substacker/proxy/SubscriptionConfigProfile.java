@@ -121,6 +121,17 @@ public enum SubscriptionConfigProfile {
     return BY_ID.containsKey(normalized) ? normalized : defaultId();
   }
 
+  /**
+   * Returns the normalized profile ID if it exists, or null otherwise.
+   */
+  public static String normalizeIfExists(String id) {
+    if (id == null || id.isBlank()) {
+      return null;
+    }
+    String normalized = id.trim().toLowerCase(Locale.ROOT);
+    return BY_ID.containsKey(normalized) ? normalized : null;
+  }
+
   private static Map<String, Object> proxySelectGroup(String name, List<String> proxies) {
     return selectGroup(name, mergeChoices(List.of("DIRECT", "REJECT"), proxies));
   }

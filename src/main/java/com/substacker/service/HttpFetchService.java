@@ -1,7 +1,11 @@
 package com.substacker.service;
 
+import com.substacker.config.AppConfig;
 import com.substacker.store.DownloadCacheStore;
+import com.substacker.util.StringUtils;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
@@ -17,6 +21,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 @ApplicationScoped
@@ -25,15 +30,33 @@ public class HttpFetchService {
 
   private final HttpClient httpClient;
   private final DownloadCacheStore cacheStore;
+  private final Duration requestTimeout;
+  private final ExecutorService executor;
+
+  @Inject
+  public HttpFetchService(DownloadCacheStore cacheStore, AppConfig config) {
+    this(cacheStore, config.httpConnectTimeout(), config.httpRequestTimeout());
+  }
 
   public HttpFetchService(DownloadCacheStore cacheStore) {
+    this(cacheStore, Duration.ofSeconds(5), Duration.ofSeconds(5));
+  }
+
+  private HttpFetchService(DownloadCacheStore cacheStore, Duration connectTimeout, Duration requestTimeout) {
+    this.requestTimeout = requestTimeout;
+    this.executor = Executors.newVirtualThreadPerTaskExecutor();
     this.httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(5))
+        .connectTimeout(connectTimeout)
         .followRedirects(HttpClient.Redirect.NORMAL)
         .proxy(new EnvProxySelector())
-        .executor(Executors.newVirtualThreadPerTaskExecutor())
+        .executor(executor)
         .build();
     this.cacheStore = cacheStore;
+  }
+
+  @PreDestroy
+  void cleanup() {
+    executor.shutdownNow();
   }
 
   public String fetchText(String url) {
@@ -66,7 +89,7 @@ public class HttpFetchService {
       try {
         HttpRequest.Builder builder = HttpRequest.newBuilder()
             .uri(URI.create(url))
-            .timeout(Duration.ofSeconds(5))
+            .timeout(requestTimeout)
             .setHeader("User-Agent", "Clash.Meta")
             .setHeader("Accept", "*/*")
             .GET();
@@ -90,7 +113,7 @@ public class HttpFetchService {
         return new Fetched(ct, body);
       } catch (Exception e) {
         lastException = e;
-        LOG.warnf("Fetch attempt %d/%d failed for %s: %s", attempt + 1, maxRetries, url, rootCauseMessage(e));
+        LOG.warnf("Fetch attempt %d/%d failed for %s: %s", attempt + 1, maxRetries, url, StringUtils.rootCauseMessage(e));
       }
     }
 
@@ -99,22 +122,13 @@ public class HttpFetchService {
       LOG.warnf("Fetch failed for %s after %d attempts, using cached entry from %s", url, maxRetries, java.time.Instant.ofEpochMilli(cached.savedAt()));
       return new Fetched(cached.contentType(), cached.body());
     }
-    throw new IllegalStateException("Failed to fetch: " + url + " (" + rootCauseMessage(lastException) + ")", lastException);
+    throw new IllegalStateException("Failed to fetch: " + url + " (" + StringUtils.rootCauseMessage(lastException) + ")", lastException);
   }
 
   public record Fetched(String contentType, String body) {
     public String contentType() {
       return contentType == null ? null : contentType.toLowerCase(Locale.ROOT);
     }
-  }
-
-  private static String rootCauseMessage(Throwable t) {
-    if (t == null) return "unknown";
-    Throwable cause = t;
-    while (cause.getCause() != null && cause.getCause() != cause) {
-      cause = cause.getCause();
-    }
-    return cause.getClass().getSimpleName() + ": " + cause.getMessage();
   }
 
   private static class EnvProxySelector extends ProxySelector {

@@ -48,8 +48,9 @@ public record SubscriptionSettings(
   }
 
   private static String normalizeDefaultConfigId(String defaultConfigId, List<SubscriptionTemplate> templates) {
-    if (SubscriptionConfigProfile.exists(defaultConfigId)) {
-      return SubscriptionConfigProfile.normalizeIdOrDefault(defaultConfigId);
+    String profileId = SubscriptionConfigProfile.normalizeIfExists(defaultConfigId);
+    if (profileId != null) {
+      return profileId;
     }
     if (defaultConfigId != null && !defaultConfigId.isBlank()) {
       String normalized = defaultConfigId.trim();

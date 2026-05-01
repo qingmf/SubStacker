@@ -9,19 +9,19 @@ import com.substacker.proxy.ProxyNode;
 import com.substacker.proxy.ResolvedSubscriptionConfig;
 import com.substacker.proxy.UpstreamParser;
 import com.substacker.proxy.UriListParser;
+import com.substacker.util.NameUtils;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 import org.yaml.snakeyaml.Yaml;
 
-import java.net.URISyntaxException;
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 @ApplicationScoped
@@ -34,6 +34,7 @@ public class SubscriptionService {
   private final List<UpstreamParser> parsers;
   private final ProxyAggregator aggregator;
   private final Yaml yaml;
+  private final ExecutorService sharedExecutor;
 
   public SubscriptionService(
       UpstreamService upstreamService,
@@ -50,6 +51,12 @@ public class SubscriptionService {
     );
     this.aggregator = new ProxyAggregator();
     this.yaml = new Yaml();
+    this.sharedExecutor = Executors.newVirtualThreadPerTaskExecutor();
+  }
+
+  @PreDestroy
+  void cleanup() {
+    sharedExecutor.shutdownNow();
   }
 
   public String buildOpenClashYaml() {
@@ -65,23 +72,21 @@ public class SubscriptionService {
   public List<ProxyNode> collectAll() {
     List<ProxyNode> out = new ArrayList<>();
     List<Upstream> upstreams = upstreamService.list();
-    try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-      record Task(Upstream upstream, Future<List<ProxyNode>> future) {}
-      List<Task> tasks = new ArrayList<>();
-      for (int i = 0; i < upstreams.size(); i++) {
-        Upstream u = upstreams.get(i);
-        if (u == null || !u.enabled()) {
-          continue;
-        }
-        final int idx = i;
-        tasks.add(new Task(u, executor.submit(() -> fetchAndParse(u, idx))));
+    record Task(Upstream upstream, Future<List<ProxyNode>> future) {}
+    List<Task> tasks = new ArrayList<>();
+    for (int i = 0; i < upstreams.size(); i++) {
+      Upstream u = upstreams.get(i);
+      if (u == null || !u.enabled()) {
+        continue;
       }
-      for (Task t : tasks) {
-        try {
-          out.addAll(t.future().get());
-        } catch (Exception e) {
-          LOG.warnf("Upstream failed: name=%s url=%s", safeName(t.upstream()), safeUrl(t.upstream()));
-        }
+      final int idx = i;
+      tasks.add(new Task(u, sharedExecutor.submit(() -> fetchAndParse(u, idx))));
+    }
+    for (Task t : tasks) {
+      try {
+        out.addAll(t.future().get());
+      } catch (Exception e) {
+        LOG.warnf("Upstream failed: name=%s url=%s", safeName(t.upstream()), safeUrl(t.upstream()));
       }
     }
     return out;
@@ -90,30 +95,28 @@ public class SubscriptionService {
   public CollectReport collectReport() {
     List<UpstreamReport> reports = new ArrayList<>();
     List<Upstream> upstreams = upstreamService.list();
-    try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-      record Task(Upstream upstream, Future<List<ProxyNode>> future) {}
-      List<Task> tasks = new ArrayList<>();
-      for (int i = 0; i < upstreams.size(); i++) {
-        Upstream u = upstreams.get(i);
-        if (u == null) {
-          continue;
-        }
-        if (!u.enabled()) {
-          reports.add(UpstreamReport.disabled(safeName(u), safeUrl(u)));
-          continue;
-        }
-        final int idx = i;
-        tasks.add(new Task(u, executor.submit(() -> fetchAndParse(u, idx))));
+    record Task(Upstream upstream, Future<List<ProxyNode>> future) {}
+    List<Task> tasks = new ArrayList<>();
+    for (int i = 0; i < upstreams.size(); i++) {
+      Upstream u = upstreams.get(i);
+      if (u == null) {
+        continue;
       }
-      for (Task t : tasks) {
-        Upstream u = t.upstream();
-        try {
-          List<ProxyNode> nodes = t.future().get();
-          reports.add(UpstreamReport.ok(safeName(u), safeUrl(u), nodes.size()));
-        } catch (Exception e) {
-          Throwable cause = e instanceof ExecutionException ? e.getCause() : e;
-          reports.add(UpstreamReport.failed(safeName(u), safeUrl(u), cause.getClass().getSimpleName() + ": " + cause.getMessage()));
-        }
+      if (!u.enabled()) {
+        reports.add(UpstreamReport.disabled(safeName(u), safeUrl(u)));
+        continue;
+      }
+      final int idx = i;
+      tasks.add(new Task(u, sharedExecutor.submit(() -> fetchAndParse(u, idx))));
+    }
+    for (Task t : tasks) {
+      Upstream u = t.upstream();
+      try {
+        List<ProxyNode> nodes = t.future().get();
+        reports.add(UpstreamReport.ok(safeName(u), safeUrl(u), nodes.size()));
+      } catch (Exception e) {
+        Throwable cause = e instanceof ExecutionException ? e.getCause() : e;
+        reports.add(UpstreamReport.failed(safeName(u), safeUrl(u), cause.getClass().getSimpleName() + ": " + cause.getMessage()));
       }
     }
     return new CollectReport(reports);
@@ -258,24 +261,10 @@ public class SubscriptionService {
   }
 
   private static String safeName(Upstream u) {
-    if (u.name() != null && !u.name().isBlank()) {
-      return u.name();
-    }
-    return u.id();
+    return NameUtils.safeName(u.name(), u.id());
   }
 
   private static String safeUrl(Upstream u) {
-    if (u.url() == null) {
-      return "";
-    }
-    try {
-      URI uri = new URI(u.url());
-      String scheme = uri.getScheme() == null ? "" : uri.getScheme();
-      String host = uri.getHost() == null ? "" : uri.getHost();
-      String path = uri.getPath() == null ? "" : uri.getPath();
-      return scheme + "://" + host + path;
-    } catch (URISyntaxException e) {
-      return "(invalid url)";
-    }
+    return NameUtils.safeUrl(u.url());
   }
 }

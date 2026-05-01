@@ -1,5 +1,6 @@
 package com.substacker.proxy;
 
+import com.substacker.util.NameUtils;
 import org.yaml.snakeyaml.Yaml;
 
 import java.util.ArrayList;
@@ -47,16 +48,11 @@ public class ClashYamlParser implements UpstreamParser {
         normalized.put(String.valueOf(e.getKey()), e.getValue());
       }
       String name = String.valueOf(normalized.getOrDefault("name", "Unnamed"));
-      normalized.put("name", decorateName(upstreamName, name));
+      normalized.put("name", NameUtils.decorateName(upstreamName, name));
       String key = dedupKeyFromClashProxy(normalized);
       out.add(new ProxyNode((String) normalized.get("name"), normalized, key));
     }
     return out;
-  }
-
-  private static String decorateName(String upstreamName, String name) {
-    String prefix = (upstreamName == null || upstreamName.isBlank()) ? "Upstream" : upstreamName.trim();
-    return prefix + " | " + (name == null ? "Unnamed" : name.trim());
   }
 
   private static String dedupKeyFromClashProxy(Map<String, Object> proxy) {
